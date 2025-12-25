@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 import { getCopilot } from "./copilot";
+import { orchestrator } from "./orchestrator";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -365,6 +366,133 @@ export async function registerRoutes(
     } catch (error) {
       res.status(500).json({
         error: "Failed to fetch templates",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/status", async (req, res) => {
+    try {
+      const status = orchestrator.getStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get orchestrator status",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/orchestrator/start", async (req, res) => {
+    try {
+      orchestrator.start();
+      res.json({ success: true, message: "Orchestrator started" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to start orchestrator",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/orchestrator/stop", async (req, res) => {
+    try {
+      orchestrator.stop();
+      res.json({ success: true, message: "Orchestrator stopped" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to stop orchestrator",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/agents", async (req, res) => {
+    try {
+      const agents = orchestrator.getAgents();
+      res.json(agents);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get agents",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/tasks", async (req, res) => {
+    try {
+      const tasks = orchestrator.getTasks();
+      res.json(tasks);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get tasks",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/orchestrator/tasks", async (req, res) => {
+    try {
+      const { type, priority, payload, incidentId, deviceIds } = req.body;
+      const task = await orchestrator.createTask(type, priority, payload, { incidentId, deviceIds });
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to create task",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/executions", async (req, res) => {
+    try {
+      const executions = orchestrator.getExecutions();
+      res.json(executions);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get executions",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/events", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string) || 100;
+      const events = orchestrator.getEvents(limit);
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get events",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/orchestrator/playbooks", async (req, res) => {
+    try {
+      const playbooks = orchestrator.getPlaybooks();
+      res.json(playbooks);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get playbooks",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/orchestrator/trigger-analysis", async (req, res) => {
+    try {
+      const { incidentId } = req.body;
+      const incident = await storage.getIncident(incidentId);
+      if (!incident) {
+        return res.status(404).json({ error: "Incident not found" });
+      }
+      const task = await orchestrator.triggerIncidentAnalysis(incident);
+      res.json(task);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to trigger analysis",
         details: error instanceof Error ? error.message : "Unknown error",
       });
     }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { 
   Bot, 
   CheckCircle2, 
@@ -7,15 +7,23 @@ import {
   Zap,
   Activity,
   BarChart3,
-  RefreshCw
+  RefreshCw,
+  Play,
+  Pause,
+  ListTodo,
+  PlayCircle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import type { Agent, AgentStatus } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import type { Agent, AgentStatus, OrchestratorStatus, AgentTask, AgentExecution, Playbook } from "@shared/schema";
 
 const statusConfig: Record<AgentStatus, { color: string; bgColor: string; icon: React.ReactNode; label: string }> = {
   active: {
@@ -42,6 +50,12 @@ const statusConfig: Record<AgentStatus, { color: string; bgColor: string; icon: 
     icon: <AlertCircle className="h-4 w-4" />,
     label: "Error",
   },
+  offline: {
+    color: "text-status-offline",
+    bgColor: "bg-status-offline",
+    icon: <AlertCircle className="h-4 w-4" />,
+    label: "Offline",
+  },
 };
 
 function formatTimeAgo(dateString: string): string {
@@ -61,8 +75,63 @@ function formatTimeAgo(dateString: string): string {
 }
 
 export default function AgentsPage() {
-  const { data: agents, isLoading } = useQuery<Agent[]>({
-    queryKey: ["/api/agents"],
+  const { toast } = useToast();
+  
+  const { data: agents, isLoading: agentsLoading, refetch: refetchAgents } = useQuery<Agent[]>({
+    queryKey: ["/api/orchestrator/agents"],
+    refetchInterval: 5000,
+  });
+
+  const { data: orchestratorStatus } = useQuery<OrchestratorStatus>({
+    queryKey: ["/api/orchestrator/status"],
+    refetchInterval: 5000,
+  });
+
+  const { data: tasks } = useQuery<AgentTask[]>({
+    queryKey: ["/api/orchestrator/tasks"],
+    refetchInterval: 5000,
+  });
+
+  const { data: executions } = useQuery<AgentExecution[]>({
+    queryKey: ["/api/orchestrator/executions"],
+    refetchInterval: 5000,
+  });
+
+  const { data: playbooks } = useQuery<Playbook[]>({
+    queryKey: ["/api/orchestrator/playbooks"],
+  });
+
+  const startOrchestrator = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/orchestrator/start");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orchestrator/status"] });
+      toast({ title: "Orchestrator Started", description: "Agent orchestrator is now running" });
+    },
+  });
+
+  const stopOrchestrator = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/orchestrator/stop");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orchestrator/status"] });
+      toast({ title: "Orchestrator Stopped", description: "Agent orchestrator has been stopped" });
+    },
+  });
+
+  const createTask = useMutation({
+    mutationFn: async (taskData: { type: string; priority: string; payload: Record<string, unknown> }) => {
+      const res = await apiRequest("POST", "/api/orchestrator/tasks", taskData);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orchestrator/tasks"] });
+      toast({ title: "Task Created", description: "New task has been queued" });
+    },
   });
 
   const stats = {
@@ -76,19 +145,61 @@ export default function AgentsPage() {
     totalTasks: agents?.reduce((sum, a) => sum + a.processedTasks, 0) || 0,
   };
 
+  const isRunning = orchestratorStatus?.status === "running";
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between gap-4 p-4 border-b border-border bg-card/50">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Agents</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Agent Orchestrator</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            AI agent status and execution monitoring
+            Autonomous agent management and task execution
           </p>
         </div>
-        <Button variant="outline" className="gap-1.5" data-testid="button-refresh-agents">
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Badge className={cn(
+            "gap-1.5",
+            isRunning ? "bg-status-online text-white" : "bg-muted text-muted-foreground"
+          )}>
+            {isRunning ? <PlayCircle className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+            {isRunning ? "Running" : "Stopped"}
+          </Badge>
+          {isRunning ? (
+            <Button 
+              variant="outline" 
+              size="sm"
+              className="gap-1.5" 
+              onClick={() => stopOrchestrator.mutate()}
+              disabled={stopOrchestrator.isPending}
+              data-testid="button-stop-orchestrator"
+            >
+              <Pause className="h-4 w-4" />
+              Stop
+            </Button>
+          ) : (
+            <Button 
+              variant="default" 
+              size="sm"
+              className="gap-1.5" 
+              onClick={() => startOrchestrator.mutate()}
+              disabled={startOrchestrator.isPending}
+              data-testid="button-start-orchestrator"
+            >
+              <Play className="h-4 w-4" />
+              Start
+            </Button>
+          )}
+          <Button 
+            variant="outline" 
+            size="sm"
+            className="gap-1.5" 
+            onClick={() => refetchAgents()}
+            data-testid="button-refresh-agents"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -159,7 +270,7 @@ export default function AgentsPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {isLoading ? (
+          {agentsLoading ? (
             [...Array(6)].map((_, i) => (
               <Skeleton key={i} className="h-48" />
             ))
@@ -189,7 +300,8 @@ export default function AgentsPage() {
                         agent.status === "active" && "bg-status-online text-white",
                         agent.status === "processing" && "bg-primary text-primary-foreground",
                         agent.status === "idle" && "bg-muted text-muted-foreground",
-                        agent.status === "error" && "bg-status-busy text-white"
+                        agent.status === "error" && "bg-status-busy text-white",
+                        agent.status === "offline" && "bg-status-offline text-white"
                       )}>
                         {config.icon}
                         {config.label}

@@ -69,17 +69,117 @@ export interface RemediationStep {
   status: RemediationStepStatus;
 }
 
-export type AgentStatus = "active" | "processing" | "idle" | "error";
+export type AgentStatus = "active" | "processing" | "idle" | "error" | "offline";
+export type AgentType = "monitor" | "anomaly" | "rca" | "remediation" | "verification" | "learning" | "compliance" | "telemetry";
+
+export interface AgentCapability {
+  name: string;
+  description: string;
+  parameters?: Record<string, string>;
+}
 
 export interface Agent {
   id: string;
   name: string;
-  type: string;
+  type: AgentType;
   status: AgentStatus;
   currentTask: string | null;
   processedTasks: number;
   successRate: number;
   lastActive: string;
+  capabilities: AgentCapability[];
+  config: Record<string, unknown>;
+  heartbeatInterval: number;
+  lastHeartbeat: string | null;
+}
+
+export type TaskPriority = "critical" | "high" | "medium" | "low";
+export type TaskStatus = "queued" | "assigned" | "running" | "completed" | "failed" | "cancelled";
+export type TaskType = "monitor" | "analyze" | "diagnose" | "remediate" | "verify" | "learn";
+
+export interface AgentTask {
+  id: string;
+  type: TaskType;
+  priority: TaskPriority;
+  status: TaskStatus;
+  assignedAgentId: string | null;
+  payload: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  retryCount: number;
+  maxRetries: number;
+  createdAt: string;
+  assignedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  incidentId: string | null;
+  deviceIds: string[];
+  parentTaskId: string | null;
+}
+
+export interface AgentExecution {
+  id: string;
+  taskId: string;
+  agentId: string;
+  status: "running" | "completed" | "failed";
+  startedAt: string;
+  completedAt: string | null;
+  output: Record<string, unknown> | null;
+  logs: string[];
+  metrics: {
+    durationMs: number | null;
+    cpuUsage: number | null;
+    memoryUsage: number | null;
+  };
+  confidence: number | null;
+}
+
+export interface Playbook {
+  id: string;
+  name: string;
+  description: string;
+  triggerConditions: {
+    incidentSeverity?: IncidentSeverity[];
+    deviceTypes?: DeviceType[];
+    patterns?: string[];
+  };
+  steps: PlaybookStep[];
+  autoApprove: boolean;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PlaybookStep {
+  id: string;
+  order: number;
+  action: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  rollbackAction: string | null;
+  timeout: number;
+  continueOnFailure: boolean;
+}
+
+export interface AgentEvent {
+  id: string;
+  agentId: string;
+  taskId: string | null;
+  eventType: "task_started" | "task_completed" | "task_failed" | "heartbeat" | "status_change" | "action_executed";
+  message: string;
+  data: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface OrchestratorStatus {
+  status: "running" | "paused" | "stopped";
+  activeAgents: number;
+  totalAgents: number;
+  queuedTasks: number;
+  runningTasks: number;
+  completedTasks24h: number;
+  failedTasks24h: number;
+  avgTaskDurationMs: number;
 }
 
 export type AuditStatus = "success" | "failure" | "pending";
