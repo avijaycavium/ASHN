@@ -113,3 +113,48 @@ GNS3 nodes are automatically mapped to AASHN device types based on naming patter
 2. If GNS3 connection fails, the system falls back to mock data
 3. Data is cached for 5 seconds to reduce API load
 4. Node status from GNS3 maps to: started=healthy, stopped=offline, suspended=degraded
+
+## Network Copilot
+
+AASHN includes a natural language interface (Network Copilot) for managing GNS3 network topologies through conversational commands.
+
+### Features
+
+- Create nodes from available GNS3 templates
+- Delete nodes from the topology
+- Start/stop individual nodes
+- Create links between nodes
+- Delete links from the topology
+- Query current topology (nodes, links, templates)
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/copilot/chat` | Process a natural language command |
+| `POST /api/copilot/clear` | Clear conversation history |
+| `GET /api/gns3/templates` | List available GNS3 templates |
+
+### Architecture
+
+The Network Copilot uses:
+- **OpenAI GPT-4o** via Replit AI Integrations (no API key required, charges billed to credits)
+- **Zod schema validation** for validating AI responses before executing GNS3 operations
+- **Topology context injection** - current nodes, links, and templates are provided with each request
+- **Graceful error handling** with informative feedback for failed operations
+
+### Example Commands
+
+- "List all available templates"
+- "Create a new router using the Cisco IOSv template"
+- "Start node Router-1"
+- "Create a link between Router-1 and Switch-1"
+- "Show me the current nodes"
+- "Stop all nodes"
+
+### Safety Features
+
+- All AI responses are validated against strict Zod schemas before execution
+- Node/link existence is verified against live topology before mutations
+- Status checks prevent redundant operations (e.g., starting an already running node)
+- Each GNS3 operation is wrapped in try/catch with descriptive error messages
