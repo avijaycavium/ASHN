@@ -58,6 +58,30 @@ export interface GNS3Project {
   scene_width: number;
 }
 
+export interface GNS3Template {
+  template_id: string;
+  name: string;
+  template_type: string;
+  category: string;
+  builtin: boolean;
+  default_name_format: string;
+}
+
+export interface CreateNodeParams {
+  name?: string;
+  x?: number;
+  y?: number;
+  compute_id?: string;
+}
+
+export interface CreateLinkParams {
+  nodes: Array<{
+    node_id: string;
+    adapter_number: number;
+    port_number: number;
+  }>;
+}
+
 export interface GNS3Version {
   version: string;
   local: boolean;
@@ -169,6 +193,86 @@ export class GNS3Client {
   async getLink(linkId: string, projectId?: string): Promise<GNS3Link> {
     const pid = projectId || this.config.projectId;
     return this.request<GNS3Link>(`/v2/projects/${pid}/links/${linkId}`);
+  }
+
+  async getTemplates(): Promise<GNS3Template[]> {
+    return this.request<GNS3Template[]>("/v2/templates");
+  }
+
+  async getTemplate(templateId: string): Promise<GNS3Template> {
+    return this.request<GNS3Template>(`/v2/templates/${templateId}`);
+  }
+
+  async createNodeFromTemplate(
+    templateId: string,
+    params: CreateNodeParams = {},
+    projectId?: string
+  ): Promise<GNS3Node> {
+    const pid = projectId || this.config.projectId;
+    return this.request<GNS3Node>(
+      `/v2/projects/${pid}/templates/${templateId}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          x: params.x ?? 0,
+          y: params.y ?? 0,
+          compute_id: params.compute_id ?? "local",
+          name: params.name,
+        }),
+      }
+    );
+  }
+
+  async deleteNode(nodeId: string, projectId?: string): Promise<void> {
+    const pid = projectId || this.config.projectId;
+    await this.request(`/v2/projects/${pid}/nodes/${nodeId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async createLink(
+    params: CreateLinkParams,
+    projectId?: string
+  ): Promise<GNS3Link> {
+    const pid = projectId || this.config.projectId;
+    return this.request<GNS3Link>(`/v2/projects/${pid}/links`, {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+  }
+
+  async deleteLink(linkId: string, projectId?: string): Promise<void> {
+    const pid = projectId || this.config.projectId;
+    await this.request(`/v2/projects/${pid}/links/${linkId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async startAllNodes(projectId?: string): Promise<void> {
+    const pid = projectId || this.config.projectId;
+    await this.request(`/v2/projects/${pid}/nodes/start`, {
+      method: "POST",
+    });
+  }
+
+  async stopAllNodes(projectId?: string): Promise<void> {
+    const pid = projectId || this.config.projectId;
+    await this.request(`/v2/projects/${pid}/nodes/stop`, {
+      method: "POST",
+    });
+  }
+
+  async createProject(name: string): Promise<GNS3Project> {
+    return this.request<GNS3Project>("/v2/projects", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await this.request(`/v2/projects/${projectId}`, {
+      method: "DELETE",
+    });
   }
 
   async testConnection(): Promise<boolean> {

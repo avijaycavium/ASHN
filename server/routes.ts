@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
+import { getCopilot } from "./copilot";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -318,6 +319,53 @@ export async function registerRoutes(
         enabled: getGNS3Config().enabled,
         connected: false,
         error: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.post("/api/copilot/chat", async (req, res) => {
+    try {
+      const { message } = req.body;
+      if (!message) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      const copilot = getCopilot();
+      const actions = await copilot.processCommand(message);
+      res.json({ actions });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to process command",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/copilot/clear", async (req, res) => {
+    try {
+      const copilot = getCopilot();
+      copilot.clearHistory();
+      res.json({ success: true, message: "Conversation history cleared" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to clear history",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/gns3/templates", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      const templates = await client.getTemplates();
+      res.json(templates);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to fetch templates",
+        details: error instanceof Error ? error.message : "Unknown error",
       });
     }
   });

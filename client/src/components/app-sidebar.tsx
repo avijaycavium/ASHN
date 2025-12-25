@@ -8,6 +8,7 @@ import {
   Bot,
   ClipboardList,
   Settings,
+  MessageCircle,
 } from "lucide-react";
 import {
   Sidebar,
@@ -54,6 +55,11 @@ const navigationItems = [
     title: "Agents",
     url: "/agents",
     icon: Bot,
+  },
+  {
+    title: "Network Copilot",
+    url: "/copilot",
+    icon: MessageCircle,
   },
   {
     title: "Audit Trail",

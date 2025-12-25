@@ -29,6 +29,7 @@ import AuditPage from "@/pages/audit";
 import MetricsPage from "@/pages/metrics";
 import TopologyPage from "@/pages/topology";
 import SettingsPage from "@/pages/settings";
+import CopilotPage from "@/pages/copilot";
 
 function Router() {
   return (
@@ -40,6 +41,7 @@ function Router() {
       <Route path="/metrics" component={MetricsPage} />
       <Route path="/topology" component={TopologyPage} />
       <Route path="/agents" component={AgentsPage} />
+      <Route path="/copilot" component={CopilotPage} />
       <Route path="/audit" component={AuditPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />
