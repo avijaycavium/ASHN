@@ -1,0 +1,92 @@
+Use case 2: Switch link failure and automatic traffic rerouting
+Scenario:
+Fault: Network link failure between switches (cable fault, transceiver failure)
+Impact: Traffic disruption, service degradation
+Agentic Flow:
+├─ Detection:
+│  ├─ Telemetry Agent: Monitors link state (interface up/down)
+│  ├─ Anomaly Detection: Detects link_down event (100% confidence)
+│  └─ Alert: "link_failure" alert created
+│
+├─ Diagnosis:
+│  ├─ RCA Agent: Identifies "Link failure between Switch-A:port1 ↔ Switch-B:port2"
+│  ├─ Topology Agent: Computes impact path (15 downstream devices affected)
+│  └─ Confidence: 95%
+│
+├─ Remediation:
+│  ├─ Remediation Planning: Finds alternate path via topology.resolve
+│  ├─ Action: Enable alternate route (OSPF/BGP auto-converges)
+│  └─ Fallback: Manual static route if needed
+│
+└─ Verification:
+   ├─ Routing protocol converges (30-60 seconds)
+   ├─ Traffic flows via alternate path
+   └─ Zero packet loss after convergence
+Performance:
+├─ TTD: <30 seconds (link state change is immediate)
+├─ TTR: <1 minute (routing convergence)
+└─ TTTR: <2 minutes (full service restoration)
+________________________________________
+Use case 3: Switch port congestion and QoS remediation
+Scenario:
+Fault: Port congestion due to traffic surge
+Symptoms: Queue depth 85% (baseline <15%), latency 250ms, packet drops
+Impact: Degraded service quality, potential SLA violations
+Agentic Flow:
+├─ Detection:
+│  ├─ Telemetry Agent (SwitchAgent): Monitors queue_depth, latency, port_errors
+│  ├─ Anomaly Detection: Flags congestion (92% confidence)
+│  └─ Alert: "port_congestion" alert created
+│
+├─ Diagnosis:
+│  ├─ RCA Agent: Analyzes traffic patterns
+│  ├─ Hypothesis: "Queue depth 85% + latency 250ms + packet drops → Port congestion"
+│  └─ Confidence: 89%
+│
+├─ Remediation:
+│  ├─ Remediation Planning: Plans QoS adjustment
+│  │  ├─ adjust_qos_buffer_thresholds(port, 20%)
+│  │  └─ reconfigure_qos_policy(port, "priority_traffic")
+│  ├─ Policy Validation: ✓ QoS changes allowed
+│  └─ Remediation Execution: Applies QoS configuration
+│
+└─ Verification:
+   ├─ Queue depth: 85% → 12% (recovered)
+   ├─ Latency: 250ms → 45ms (normalized)
+   └─ Packet loss: Reduced from 5% to <0.1%
+Performance:
+├─ TTD: <2 minutes
+├─ TTR: <1 minute
+└─ TTTR: <3 minutes
+________________________________________
+Use case 4: DPU workload imbalance and automatic migration
+Scenario:
+Fault: DPU resource exhaustion (CPU saturation, memory pressure)
+Symptoms: CPU 95% (baseline <70%), latency spike 250ms (baseline <100ms)
+Impact: Application performance degradation
+Agentic Flow:
+├─ Detection:
+│  ├─ Telemetry Agent (DpuAgent): Monitors CPU, memory, latency
+│  ├─ Anomaly Detection: Flags resource exhaustion (88% confidence)
+│  └─ Alert: "dpu_resource_exhaustion" alert created
+│
+├─ Diagnosis:
+│  ├─ RCA Agent: Analyzes workload patterns
+│  ├─ Hypothesis: "CPU saturation → Workload imbalance or offload misconfiguration"
+│  └─ Confidence: 85%
+│
+├─ Remediation:
+│  ├─ Remediation Planning: Plans workload migration
+│  │  ├─ migrate_workload(container_id, target_dpu)
+│  │  └─ adjust_offload_rules(rule_id, new_config)
+│  ├─ Policy Validation: ✓ Workload migration allowed
+│  └─ Remediation Execution: Migrates workload to less loaded DPU
+│
+└─ Verification:
+   ├─ CPU usage: 95% → 65% (normalized)
+   ├─ Latency: 250ms → 80ms (recovered)
+   └─ Workload: Successfully migrated, no service disruption
+Performance:
+├─ TTD: <2 minutes
+├─ TTR: <2 minutes (migration time)
+└─ TTTR: <5 minutes
