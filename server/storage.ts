@@ -11,8 +11,11 @@ import {
   type SystemHealth,
   type KPIMetrics,
   type LearningUpdate,
+  type TopologyLink,
+  type GNS3Settings,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+import { getGNS3Client, getGNS3Config, type GNS3Link } from "./gns3";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -36,9 +39,14 @@ export interface IStorage {
   getSystemHealth(): Promise<SystemHealth>;
   getKPIMetrics(): Promise<KPIMetrics>;
   getLearningUpdates(): Promise<LearningUpdate[]>;
+  
+  getTopologyLinks(): Promise<TopologyLink[]>;
+  getGNS3Settings(): Promise<GNS3Settings>;
+  updateGNS3Settings(settings: Partial<GNS3Settings>): Promise<GNS3Settings>;
+  testGNS3Connection(): Promise<{ success: boolean; message: string; version?: string }>;
 }
 
-function generateDevices(): Device[] {
+function generateMockDevices(): Device[] {
   const devices: Device[] = [];
   
   devices.push({
@@ -128,7 +136,7 @@ function generateIncidents(): Incident[] {
       ttr: 50,
       tttr: null,
       affectedDevices: ["spine-1", "tor-1", "dpu-1", "dpu-2", "dpu-3"],
-      rootCause: "Link failure between Spine-1:port1 ↔ TOR-1:port1. Physical layer issue detected via SNMP ifOperStatus.",
+      rootCause: "Link failure between Spine-1:port1 and TOR-1:port1. Physical layer issue detected via SNMP ifOperStatus.",
       confidence: 98,
       createdAt: new Date(now.getTime() - 5 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 2 * 60000).toISOString(),
@@ -543,19 +551,77 @@ function generateLearningUpdates(): LearningUpdate[] {
   ];
 }
 
+function generateMockTopologyLinks(devices: Device[]): TopologyLink[] {
+  const links: TopologyLink[] = [];
+  
+  const core = devices.find(d => d.type === "core");
+  const spines = devices.filter(d => d.type === "spine");
+  const tors = devices.filter(d => d.type === "tor");
+  
+  if (core) {
+    spines.forEach((spine, idx) => {
+      links.push({
+        id: `link-core-spine-${idx}`,
+        sourceId: core.id,
+        targetId: spine.id,
+        sourcePort: idx + 1,
+        targetPort: 1,
+        status: spine.status === "healthy" ? "active" : "error",
+        bandwidth: 100000,
+        utilization: 20 + Math.random() * 40,
+      });
+    });
+  }
+  
+  spines.forEach((spine, spineIdx) => {
+    tors.forEach((tor, torIdx) => {
+      if (torIdx % 2 === spineIdx % 2) {
+        links.push({
+          id: `link-spine-tor-${spineIdx}-${torIdx}`,
+          sourceId: spine.id,
+          targetId: tor.id,
+          sourcePort: torIdx + 2,
+          targetPort: spineIdx + 1,
+          status: tor.status === "healthy" && spine.status === "healthy" ? "active" : "error",
+          bandwidth: 40000,
+          utilization: 30 + Math.random() * 50,
+        });
+      }
+    });
+  });
+  
+  return links;
+}
+
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
-  private devices: Device[];
+  private mockDevices: Device[];
   private incidents: Incident[];
   private agents: Agent[];
   private auditEntries: AuditEntry[];
+  private gns3Settings: GNS3Settings;
+  private cachedGNS3Devices: Device[] | null = null;
+  private cachedGNS3Links: GNS3Link[] | null = null;
+  private cacheTimestamp: number = 0;
+  private readonly CACHE_TTL = 5000;
 
   constructor() {
     this.users = new Map();
-    this.devices = generateDevices();
+    this.mockDevices = generateMockDevices();
     this.incidents = generateIncidents();
     this.agents = generateAgents();
     this.auditEntries = generateAuditEntries();
+    
+    const config = getGNS3Config();
+    this.gns3Settings = {
+      serverUrl: config.serverUrl,
+      projectId: config.projectId,
+      username: config.username || "",
+      password: config.password || "",
+      enabled: config.enabled,
+      lastConnected: null,
+      connectionStatus: "disconnected",
+    };
   }
 
   async getUser(id: string): Promise<User | undefined> {
@@ -575,12 +641,64 @@ export class MemStorage implements IStorage {
     return user;
   }
 
+  private async fetchGNS3Data(): Promise<{ devices: Device[]; links: GNS3Link[] }> {
+    const now = Date.now();
+    
+    if (
+      this.cachedGNS3Devices &&
+      this.cachedGNS3Links &&
+      now - this.cacheTimestamp < this.CACHE_TTL
+    ) {
+      return { devices: this.cachedGNS3Devices, links: this.cachedGNS3Links };
+    }
+
+    const client = getGNS3Client();
+    if (!client) {
+      return { devices: [], links: [] };
+    }
+
+    try {
+      const [nodes, links] = await Promise.all([
+        client.getNodes(),
+        client.getLinks(),
+      ]);
+
+      const devices = nodes.map((node) => client.mapNodeToDevice(node, links));
+      
+      this.cachedGNS3Devices = devices;
+      this.cachedGNS3Links = links;
+      this.cacheTimestamp = now;
+      this.gns3Settings.connectionStatus = "connected";
+      this.gns3Settings.lastConnected = new Date().toISOString();
+
+      return { devices, links };
+    } catch (error) {
+      console.error("Failed to fetch GNS3 data:", error);
+      this.gns3Settings.connectionStatus = "error";
+      return { devices: [], links: [] };
+    }
+  }
+
   async getDevices(): Promise<Device[]> {
-    return this.devices;
+    const config = getGNS3Config();
+    
+    if (config.enabled && config.projectId) {
+      try {
+        const { devices } = await this.fetchGNS3Data();
+        if (devices.length > 0) {
+          return devices;
+        }
+      } catch (error) {
+        console.error("GNS3 fetch failed, falling back to mock data:", error);
+      }
+    }
+    
+    return this.mockDevices;
   }
 
   async getDevice(id: string): Promise<Device | undefined> {
-    return this.devices.find((d) => d.id === id);
+    const devices = await this.getDevices();
+    return devices.find((d) => d.id === id);
   }
 
   async getIncidents(): Promise<Incident[]> {
@@ -616,7 +734,7 @@ export class MemStorage implements IStorage {
   }
 
   async getSystemHealth(): Promise<SystemHealth> {
-    const devices = this.devices;
+    const devices = await this.getDevices();
     return {
       cpu: 35,
       memory: 45,
@@ -655,6 +773,76 @@ export class MemStorage implements IStorage {
 
   async getLearningUpdates(): Promise<LearningUpdate[]> {
     return generateLearningUpdates();
+  }
+
+  async getTopologyLinks(): Promise<TopologyLink[]> {
+    const config = getGNS3Config();
+    
+    if (config.enabled && config.projectId) {
+      try {
+        const { devices, links } = await this.fetchGNS3Data();
+        if (links.length > 0) {
+          return links.map((link): TopologyLink => ({
+            id: link.link_id,
+            sourceId: link.nodes[0]?.node_id || "",
+            targetId: link.nodes[1]?.node_id || "",
+            sourcePort: link.nodes[0]?.port_number || 0,
+            targetPort: link.nodes[1]?.port_number || 0,
+            status: link.capturing ? "active" : "active",
+            bandwidth: 10000,
+            utilization: Math.random() * 60,
+          }));
+        }
+      } catch (error) {
+        console.error("GNS3 links fetch failed:", error);
+      }
+    }
+    
+    const devices = await this.getDevices();
+    return generateMockTopologyLinks(devices);
+  }
+
+  async getGNS3Settings(): Promise<GNS3Settings> {
+    return this.gns3Settings;
+  }
+
+  async updateGNS3Settings(settings: Partial<GNS3Settings>): Promise<GNS3Settings> {
+    this.gns3Settings = { ...this.gns3Settings, ...settings };
+    
+    this.cachedGNS3Devices = null;
+    this.cachedGNS3Links = null;
+    this.cacheTimestamp = 0;
+    
+    return this.gns3Settings;
+  }
+
+  async testGNS3Connection(): Promise<{ success: boolean; message: string; version?: string }> {
+    const client = getGNS3Client();
+    
+    if (!client) {
+      return {
+        success: false,
+        message: "GNS3 integration is not enabled. Set GNS3_ENABLED=true to enable.",
+      };
+    }
+
+    try {
+      const version = await client.getVersion();
+      this.gns3Settings.connectionStatus = "connected";
+      this.gns3Settings.lastConnected = new Date().toISOString();
+      
+      return {
+        success: true,
+        message: `Connected to GNS3 server`,
+        version: version.version,
+      };
+    } catch (error) {
+      this.gns3Settings.connectionStatus = "error";
+      return {
+        success: false,
+        message: `Failed to connect: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
   }
 }
 

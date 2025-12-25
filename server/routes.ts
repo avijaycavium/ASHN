@@ -1,12 +1,12 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // Get all devices
   app.get("/api/devices", async (req, res) => {
     try {
       const devices = await storage.getDevices();
@@ -16,7 +16,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get single device
   app.get("/api/devices/:id", async (req, res) => {
     try {
       const device = await storage.getDevice(req.params.id);
@@ -29,7 +28,54 @@ export async function registerRoutes(
     }
   });
 
-  // Get all incidents
+  app.post("/api/devices/:id/start", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      await client.startNode(req.params.id);
+      res.json({ success: true, message: "Node started" });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to start device",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.post("/api/devices/:id/stop", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      await client.stopNode(req.params.id);
+      res.json({ success: true, message: "Node stopped" });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to stop device",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.post("/api/devices/:id/reload", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      await client.reloadNode(req.params.id);
+      res.json({ success: true, message: "Node reloaded" });
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to reload device",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
   app.get("/api/incidents", async (req, res) => {
     try {
       const incidents = await storage.getIncidents();
@@ -39,7 +85,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get single incident
   app.get("/api/incidents/:id", async (req, res) => {
     try {
       const incident = await storage.getIncident(req.params.id);
@@ -52,7 +97,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get incident timeline
   app.get("/api/incidents/:id/timeline", async (req, res) => {
     try {
       const timeline = await storage.getIncidentTimeline(req.params.id);
@@ -62,7 +106,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get incident remediation steps
   app.get("/api/incidents/:id/remediation", async (req, res) => {
     try {
       const steps = await storage.getIncidentRemediation(req.params.id);
@@ -72,7 +115,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get all agents
   app.get("/api/agents", async (req, res) => {
     try {
       const agents = await storage.getAgents();
@@ -82,7 +124,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get single agent
   app.get("/api/agents/:id", async (req, res) => {
     try {
       const agent = await storage.getAgent(req.params.id);
@@ -95,7 +136,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get audit entries
   app.get("/api/audit", async (req, res) => {
     try {
       const entries = await storage.getAuditEntries();
@@ -105,7 +145,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get metric trends
   app.get("/api/metrics/trends", async (req, res) => {
     try {
       const trends = await storage.getMetricTrends();
@@ -115,7 +154,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get system health
   app.get("/api/health", async (req, res) => {
     try {
       const health = await storage.getSystemHealth();
@@ -125,7 +163,6 @@ export async function registerRoutes(
     }
   });
 
-  // Get KPI metrics
   app.get("/api/kpis", async (req, res) => {
     try {
       const kpis = await storage.getKPIMetrics();
@@ -135,13 +172,153 @@ export async function registerRoutes(
     }
   });
 
-  // Get learning updates
   app.get("/api/learning", async (req, res) => {
     try {
       const updates = await storage.getLearningUpdates();
       res.json(updates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch learning updates" });
+    }
+  });
+
+  app.get("/api/topology/links", async (req, res) => {
+    try {
+      const links = await storage.getTopologyLinks();
+      res.json(links);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch topology links" });
+    }
+  });
+
+  app.get("/api/gns3/settings", async (req, res) => {
+    try {
+      const settings = await storage.getGNS3Settings();
+      const safeSettings = {
+        ...settings,
+        password: settings.password ? "********" : "",
+      };
+      res.json(safeSettings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch GNS3 settings" });
+    }
+  });
+
+  app.post("/api/gns3/test", async (req, res) => {
+    try {
+      const result = await storage.testGNS3Connection();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ 
+        success: false,
+        message: error instanceof Error ? error.message : "Connection test failed"
+      });
+    }
+  });
+
+  app.get("/api/gns3/projects", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      const projects = await client.getProjects();
+      res.json(projects);
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch GNS3 projects",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.get("/api/gns3/nodes", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      const nodes = await client.getNodes();
+      res.json(nodes);
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch GNS3 nodes",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.get("/api/gns3/links", async (req, res) => {
+    try {
+      const client = getGNS3Client();
+      if (!client) {
+        return res.status(400).json({ error: "GNS3 not enabled" });
+      }
+      const links = await client.getLinks();
+      res.json(links);
+    } catch (error) {
+      res.status(500).json({ 
+        error: "Failed to fetch GNS3 links",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  app.get("/api/gns3/status", async (req, res) => {
+    try {
+      const config = getGNS3Config();
+      const client = getGNS3Client();
+      
+      if (!config.enabled) {
+        return res.json({
+          enabled: false,
+          connected: false,
+          message: "GNS3 integration is disabled",
+        });
+      }
+
+      if (!client) {
+        return res.json({
+          enabled: true,
+          connected: false,
+          message: "GNS3 client not initialized",
+        });
+      }
+
+      const isConnected = await client.testConnection();
+      let version = null;
+      let projectInfo = null;
+
+      if (isConnected) {
+        try {
+          const versionData = await client.getVersion();
+          version = versionData.version;
+          
+          if (config.projectId) {
+            const project = await client.getProject(config.projectId);
+            projectInfo = {
+              name: project.name,
+              status: project.status,
+            };
+          }
+        } catch (e) {
+        }
+      }
+
+      res.json({
+        enabled: true,
+        connected: isConnected,
+        serverUrl: config.serverUrl,
+        projectId: config.projectId,
+        version,
+        project: projectInfo,
+        message: isConnected ? "Connected to GNS3 server" : "Unable to connect to GNS3 server",
+      });
+    } catch (error) {
+      res.status(500).json({ 
+        enabled: getGNS3Config().enabled,
+        connected: false,
+        error: error instanceof Error ? error.message : "Unknown error"
+      });
     }
   });
 
