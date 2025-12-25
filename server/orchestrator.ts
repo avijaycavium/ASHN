@@ -1098,6 +1098,207 @@ class AgentOrchestrator {
       this.events = this.events.slice(-500);
     }
   }
+
+  private demoScenario: {
+    active: boolean;
+    type: string | null;
+    stage: "idle" | "detection" | "diagnosis" | "remediation" | "verification" | "resolved";
+    incidentId: string | null;
+    startedAt: string | null;
+    events: Array<{ stage: string; event: string; timestamp: string; agent: string }>;
+    deviceId: string | null;
+    targetDeviceId: string | null;
+  } = {
+    active: false,
+    type: null,
+    stage: "idle",
+    incidentId: null,
+    startedAt: null,
+    events: [],
+    deviceId: null,
+    targetDeviceId: null,
+  };
+
+  async injectFault(
+    scenario: "link_failure" | "port_congestion" | "dpu_overload",
+    deviceId?: string,
+    targetDeviceId?: string
+  ): Promise<{ success: boolean; incidentId: string; message: string }> {
+    const now = new Date();
+    const incidentId = `DEMO-${now.getTime()}`;
+    
+    this.demoScenario = {
+      active: true,
+      type: scenario,
+      stage: "detection",
+      incidentId,
+      startedAt: now.toISOString(),
+      events: [],
+      deviceId: deviceId || null,
+      targetDeviceId: targetDeviceId || null,
+    };
+
+    this.addDemoEvent("detection", "Fault Injected", "System");
+
+    if (!this.isRunning) {
+      this.start();
+    }
+
+    this.runDemoScenario(scenario, incidentId, deviceId, targetDeviceId).catch((error) => {
+      console.error("Demo scenario error:", error);
+      this.addDemoEvent("error", `Scenario failed: ${error instanceof Error ? error.message : String(error)}`, "System");
+      this.demoScenario.active = false;
+    });
+
+    return {
+      success: true,
+      incidentId,
+      message: `${scenario} scenario started. Agentic framework is now responding.`,
+    };
+  }
+
+  private addDemoEvent(stage: string, event: string, agent: string): void {
+    this.demoScenario.events.push({
+      stage,
+      event,
+      timestamp: new Date().toISOString(),
+      agent,
+    });
+    this.logEvent("system", null, "state_changed", `Demo: ${event}`, { stage, agent });
+  }
+
+  private async runDemoScenario(
+    scenario: string,
+    incidentId: string,
+    deviceId?: string,
+    targetDeviceId?: string
+  ): Promise<void> {
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+    try {
+      await delay(2000);
+      this.demoScenario.stage = "detection";
+      
+      if (scenario === "link_failure") {
+        this.addDemoEvent("detection", "Link state changed to DOWN", "Telemetry Agent");
+        await delay(1500);
+        this.addDemoEvent("detection", "link_down event detected (100% confidence)", "Anomaly Agent");
+        await delay(1000);
+        this.addDemoEvent("detection", "link_failure alert created", "System");
+      } else if (scenario === "port_congestion") {
+        this.addDemoEvent("detection", "Queue depth at 85% (baseline <15%)", "Telemetry Agent");
+        await delay(1500);
+        this.addDemoEvent("detection", "Port congestion detected (92% confidence)", "Anomaly Agent");
+        await delay(1000);
+        this.addDemoEvent("detection", "port_congestion alert created", "System");
+      } else if (scenario === "dpu_overload") {
+        this.addDemoEvent("detection", "DPU CPU at 95% (baseline <70%)", "Telemetry Agent");
+        await delay(1500);
+        this.addDemoEvent("detection", "DPU resource exhaustion detected (88% confidence)", "Anomaly Agent");
+        await delay(1000);
+        this.addDemoEvent("detection", "dpu_resource_exhaustion alert created", "System");
+      }
+
+      await delay(2000);
+      this.demoScenario.stage = "diagnosis";
+
+      if (scenario === "link_failure") {
+        this.addDemoEvent("diagnosis", "Analyzing link failure location", "RCA Agent");
+        await delay(2000);
+        this.addDemoEvent("diagnosis", "Computing impact path - 15 devices affected", "Topology Agent");
+        await delay(1500);
+        this.addDemoEvent("diagnosis", "Root cause confirmed (95% confidence)", "RCA Agent");
+      } else if (scenario === "port_congestion") {
+        this.addDemoEvent("diagnosis", "Analyzing traffic patterns", "RCA Agent");
+        await delay(2000);
+        this.addDemoEvent("diagnosis", "Queue depth + latency + drops = Port congestion", "RCA Agent");
+        await delay(1500);
+        this.addDemoEvent("diagnosis", "Hypothesis confirmed (89% confidence)", "RCA Agent");
+      } else if (scenario === "dpu_overload") {
+        this.addDemoEvent("diagnosis", "Analyzing workload patterns", "RCA Agent");
+        await delay(2000);
+        this.addDemoEvent("diagnosis", "CPU saturation = Workload imbalance", "RCA Agent");
+        await delay(1500);
+        this.addDemoEvent("diagnosis", "Root cause confirmed (85% confidence)", "RCA Agent");
+      }
+
+      await delay(2000);
+      this.demoScenario.stage = "remediation";
+
+      if (scenario === "link_failure") {
+        this.addDemoEvent("remediation", "Finding alternate path via topology.resolve", "Remediation Agent");
+        await delay(2000);
+        this.addDemoEvent("remediation", "Alternate route identified", "Remediation Agent");
+        await delay(1500);
+        this.addDemoEvent("remediation", "Enabling alternate route - OSPF/BGP auto-converging", "Remediation Agent");
+        await delay(3000);
+        this.addDemoEvent("remediation", "Routing protocol convergence in progress", "Remediation Agent");
+      } else if (scenario === "port_congestion") {
+        this.addDemoEvent("remediation", "Adjusting QoS buffer thresholds (+20%)", "Remediation Agent");
+        await delay(2000);
+        this.addDemoEvent("remediation", "Policy validation passed", "Compliance Agent");
+        await delay(1500);
+        this.addDemoEvent("remediation", "Reconfiguring QoS policy to priority_traffic", "Remediation Agent");
+      } else if (scenario === "dpu_overload") {
+        this.addDemoEvent("remediation", "Identifying target DPU with available capacity", "Remediation Agent");
+        await delay(2000);
+        this.addDemoEvent("remediation", targetDeviceId ? `Target ${targetDeviceId} selected` : "Target DPU identified (CPU 45%, Memory 52%)", "Remediation Agent");
+        await delay(1500);
+        this.addDemoEvent("remediation", "Live migration of container workload initiated", "Remediation Agent");
+        await delay(2000);
+        this.addDemoEvent("remediation", "Adjusting offload rules for optimal distribution", "Remediation Agent");
+      }
+
+      await delay(3000);
+      this.demoScenario.stage = "verification";
+
+      if (scenario === "link_failure") {
+        this.addDemoEvent("verification", "Routing convergence completed (45 seconds)", "Verification Agent");
+        await delay(2000);
+        this.addDemoEvent("verification", "Traffic flowing via alternate path", "Verification Agent");
+        await delay(1500);
+        this.addDemoEvent("verification", "Zero packet loss after convergence", "Verification Agent");
+      } else if (scenario === "port_congestion") {
+        this.addDemoEvent("verification", "Queue depth: 85% -> 12% (recovered)", "Verification Agent");
+        await delay(1500);
+        this.addDemoEvent("verification", "Latency: 250ms -> 45ms (normalized)", "Verification Agent");
+        await delay(1500);
+        this.addDemoEvent("verification", "Packet loss: 5% -> <0.1%", "Verification Agent");
+      } else if (scenario === "dpu_overload") {
+        this.addDemoEvent("verification", "CPU usage: 95% -> 65% (normalized)", "Verification Agent");
+        await delay(1500);
+        this.addDemoEvent("verification", "Latency: 250ms -> 80ms (recovered)", "Verification Agent");
+        await delay(1500);
+        this.addDemoEvent("verification", "No service disruption during migration", "Verification Agent");
+      }
+
+      await delay(2000);
+      this.demoScenario.stage = "resolved";
+      this.addDemoEvent("resolved", "Incident resolved - System healthy", "System");
+
+    } catch (error) {
+      console.error("Demo scenario error:", error);
+      this.addDemoEvent("error", `Scenario failed: ${error}`, "System");
+    }
+  }
+
+  getDemoScenarioStatus(): typeof this.demoScenario {
+    return { ...this.demoScenario };
+  }
+
+  async resetDemoScenario(): Promise<void> {
+    this.demoScenario = {
+      active: false,
+      type: null,
+      stage: "idle",
+      incidentId: null,
+      startedAt: null,
+      events: [],
+      deviceId: null,
+      targetDeviceId: null,
+    };
+    this.logEvent("system", null, "state_changed", "Demo scenario reset");
+  }
 }
 
 export const orchestrator = new AgentOrchestrator();

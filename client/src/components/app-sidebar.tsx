@@ -10,6 +10,7 @@ import {
   Settings,
   MessageCircle,
   FlaskConical,
+  Play,
 } from "lucide-react";
 import {
   Sidebar,
@@ -66,6 +67,11 @@ const navigationItems = [
     title: "Use Cases",
     url: "/use-cases",
     icon: FlaskConical,
+  },
+  {
+    title: "Demo Console",
+    url: "/demo",
+    icon: Play,
   },
   {
     title: "Audit Trail",

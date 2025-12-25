@@ -31,6 +31,7 @@ import TopologyPage from "@/pages/topology";
 import SettingsPage from "@/pages/settings";
 import CopilotPage from "@/pages/copilot";
 import UseCasesPage from "@/pages/use-cases";
+import DemoConsolePage from "@/pages/demo-console";
 
 function Router() {
   return (
@@ -44,6 +45,7 @@ function Router() {
       <Route path="/agents" component={AgentsPage} />
       <Route path="/copilot" component={CopilotPage} />
       <Route path="/use-cases" component={UseCasesPage} />
+      <Route path="/demo" component={DemoConsolePage} />
       <Route path="/audit" component={AuditPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route component={NotFound} />

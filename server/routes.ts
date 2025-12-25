@@ -498,5 +498,45 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/demo/inject-fault", async (req, res) => {
+    try {
+      const { scenario, deviceId, targetDeviceId } = req.body;
+      if (!scenario) {
+        return res.status(400).json({ error: "Scenario is required" });
+      }
+      const result = await orchestrator.injectFault(scenario, deviceId, targetDeviceId);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to inject fault",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/demo/scenario-status", async (req, res) => {
+    try {
+      const status = orchestrator.getDemoScenarioStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get demo status",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/demo/reset", async (req, res) => {
+    try {
+      await orchestrator.resetDemoScenario();
+      res.json({ success: true, message: "Demo scenario reset" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to reset demo",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   return httpServer;
 }
