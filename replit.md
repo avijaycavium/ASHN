@@ -66,3 +66,50 @@ The storage layer uses an interface pattern (`IStorage`) allowing easy swapping 
 - **Tailwind CSS**: Utility-first styling
 
 The application is configured for Replit deployment with specific plugins for development banners and runtime error overlays.
+
+## GNS3 Integration
+
+AASHN supports integration with GNS3 network simulation for real device data instead of mock data.
+
+### Configuration
+
+Set the following environment variables in the Secrets panel:
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `GNS3_ENABLED` | Set to "true" to enable GNS3 integration | Yes |
+| `GNS3_SERVER_URL` | GNS3 server URL (default: http://localhost:3080) | Yes |
+| `GNS3_PROJECT_ID` | UUID of the GNS3 project to monitor | Yes |
+| `GNS3_USERNAME` | GNS3 authentication username | Optional |
+| `GNS3_PASSWORD` | GNS3 authentication password | Optional |
+
+### GNS3 API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/gns3/status` | Get GNS3 connection status and configuration |
+| `POST /api/gns3/test` | Test connection to GNS3 server |
+| `GET /api/gns3/projects` | List all GNS3 projects |
+| `GET /api/gns3/nodes` | Get all nodes in the configured project |
+| `GET /api/gns3/links` | Get all links in the configured project |
+| `POST /api/devices/:id/start` | Start a GNS3 node |
+| `POST /api/devices/:id/stop` | Stop a GNS3 node |
+| `POST /api/devices/:id/reload` | Reload a GNS3 node |
+
+### Device Type Mapping
+
+GNS3 nodes are automatically mapped to AASHN device types based on naming patterns:
+
+| AASHN Type | GNS3 Patterns |
+|------------|---------------|
+| Core | Names containing "core", "cr-", or Dynamips nodes |
+| Spine | Names containing "spine", "sp-", or ethernet_switch type |
+| TOR | Names containing "tor", "leaf", "sw-" |
+| DPU | Names containing "dpu", "host", "pc", or VPCS/Docker types |
+
+### Data Flow
+
+1. When GNS3 is enabled with a valid project ID, devices are fetched from GNS3
+2. If GNS3 connection fails, the system falls back to mock data
+3. Data is cached for 5 seconds to reduce API load
+4. Node status from GNS3 maps to: started=healthy, stopped=offline, suspended=degraded

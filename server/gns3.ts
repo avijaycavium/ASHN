@@ -100,7 +100,16 @@ export class GNS3Client {
       );
     }
 
-    return response.json();
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return {} as T;
+    }
+
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.includes("application/json")) {
+      return response.json();
+    }
+
+    return {} as T;
   }
 
   async getVersion(): Promise<GNS3Version> {
