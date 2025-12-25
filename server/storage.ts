@@ -512,6 +512,44 @@ function generateTimeline(incidentId: string): TimelineEvent[] {
     ];
   }
   
+  if (incidentId === "INC-2025-004") {
+    const resolvedTime = now.getTime() - 2 * 60 * 60000;
+    return [
+      { id: "tl-401", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Link Down Detected", agent: "Telemetry Agent", details: "Interface state changed to down on Spine-2:port3" },
+      { id: "tl-402", incidentId, timestamp: new Date(resolvedTime + 5000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "link_down event detected with 100% confidence" },
+      { id: "tl-403", incidentId, timestamp: new Date(resolvedTime + 10000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Link failure confirmed with 98% confidence" },
+      { id: "tl-404", incidentId, timestamp: new Date(resolvedTime + 25000).toISOString(), event: "Alternate Path Found", agent: "Remediation Agent", details: "Alternate route via Spine-1 identified" },
+      { id: "tl-405", incidentId, timestamp: new Date(resolvedTime + 35000).toISOString(), event: "Remediation Started", agent: "Remediation Agent", details: "Enabling alternate route - OSPF/BGP auto-converging" },
+      { id: "tl-406", incidentId, timestamp: new Date(resolvedTime + 58000).toISOString(), event: "Routing Converged", agent: "Verification Agent", details: "OSPF/BGP convergence completed in 45 seconds" },
+      { id: "tl-407", incidentId, timestamp: new Date(resolvedTime + 115000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "Traffic flowing normally via alternate path. Zero packet loss." },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-005") {
+    const resolvedTime = now.getTime() - 4 * 60 * 60000;
+    return [
+      { id: "tl-501", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Congestion Detected", agent: "Telemetry Agent", details: "Queue depth at 82% (baseline <15%), latency 230ms" },
+      { id: "tl-502", incidentId, timestamp: new Date(resolvedTime + 45000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "Port congestion detected with 90% confidence" },
+      { id: "tl-503", incidentId, timestamp: new Date(resolvedTime + 105000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Traffic surge causing queue overflow (92% confidence)" },
+      { id: "tl-504", incidentId, timestamp: new Date(resolvedTime + 120000).toISOString(), event: "QoS Adjustment Started", agent: "Remediation Agent", details: "Adjusting buffer thresholds by 20%" },
+      { id: "tl-505", incidentId, timestamp: new Date(resolvedTime + 140000).toISOString(), event: "QoS Policy Applied", agent: "Remediation Agent", details: "Priority traffic policy reconfigured" },
+      { id: "tl-506", incidentId, timestamp: new Date(resolvedTime + 175000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "Queue depth normalized to 12%, latency reduced to 45ms" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-006") {
+    const resolvedTime = now.getTime() - 6 * 60 * 60000;
+    return [
+      { id: "tl-601", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Resource Alert", agent: "Telemetry Agent", details: "DPU-12 CPU at 94%, latency 245ms" },
+      { id: "tl-602", incidentId, timestamp: new Date(resolvedTime + 35000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "DPU resource exhaustion detected with 86% confidence" },
+      { id: "tl-603", incidentId, timestamp: new Date(resolvedTime + 95000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "CPU saturation caused by workload imbalance (88% confidence)" },
+      { id: "tl-604", incidentId, timestamp: new Date(resolvedTime + 110000).toISOString(), event: "Target DPU Identified", agent: "Remediation Agent", details: "DPU-15 identified with available capacity" },
+      { id: "tl-605", incidentId, timestamp: new Date(resolvedTime + 130000).toISOString(), event: "Migration Started", agent: "Remediation Agent", details: "Live migration of container workload initiated" },
+      { id: "tl-606", incidentId, timestamp: new Date(resolvedTime + 200000).toISOString(), event: "Offload Rules Updated", agent: "Remediation Agent", details: "Offload rules adjusted for optimal distribution" },
+      { id: "tl-607", incidentId, timestamp: new Date(resolvedTime + 285000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "CPU normalized to 62%, latency recovered to 78ms" },
+    ];
+  }
+  
   return [];
 }
 
@@ -532,6 +570,34 @@ function generateRemediation(incidentId: string): RemediationStep[] {
       { id: "rem-303", incidentId, step: 3, description: "Migrate workload to DPU-8 (live migration)", status: "running" },
       { id: "rem-304", incidentId, step: 4, description: "Adjust offload rules for optimal distribution", status: "pending" },
       { id: "rem-305", incidentId, step: 5, description: "Verify CPU normalized and latency recovered", status: "pending" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-004") {
+    return [
+      { id: "rem-401", incidentId, step: 1, description: "Identify link failure location", status: "completed" },
+      { id: "rem-402", incidentId, step: 2, description: "Find alternate route via Spine-1", status: "completed" },
+      { id: "rem-403", incidentId, step: 3, description: "Enable alternate route - OSPF/BGP auto-converging", status: "completed" },
+      { id: "rem-404", incidentId, step: 4, description: "Verify traffic flowing via alternate path", status: "completed" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-005") {
+    return [
+      { id: "rem-501", incidentId, step: 1, description: "Analyze queue depth, latency, and packet drop metrics", status: "completed" },
+      { id: "rem-502", incidentId, step: 2, description: "Adjust QoS buffer thresholds (+20%)", status: "completed" },
+      { id: "rem-503", incidentId, step: 3, description: "Reconfigure QoS policy to priority_traffic", status: "completed" },
+      { id: "rem-504", incidentId, step: 4, description: "Verify queue depth and latency normalized", status: "completed" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-006") {
+    return [
+      { id: "rem-601", incidentId, step: 1, description: "Analyze DPU CPU, memory, and latency metrics", status: "completed" },
+      { id: "rem-602", incidentId, step: 2, description: "Identify target DPU with available capacity", status: "completed" },
+      { id: "rem-603", incidentId, step: 3, description: "Migrate workload to DPU-15 (live migration)", status: "completed" },
+      { id: "rem-604", incidentId, step: 4, description: "Adjust offload rules for optimal distribution", status: "completed" },
+      { id: "rem-605", incidentId, step: 5, description: "Verify CPU normalized and latency recovered", status: "completed" },
     ];
   }
   
