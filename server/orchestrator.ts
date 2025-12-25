@@ -1105,9 +1105,55 @@ class AgentOrchestrator {
     stage: "idle" | "detection" | "diagnosis" | "remediation" | "verification" | "resolved";
     incidentId: string | null;
     startedAt: string | null;
-    events: Array<{ stage: string; event: string; timestamp: string; agent: string }>;
+    events: Array<{ 
+      stage: string; 
+      event: string; 
+      timestamp: string; 
+      agent: string;
+      details?: {
+        metrics?: Record<string, { baseline?: string; current?: string; threshold?: string; status?: string }>;
+        confidence?: number;
+        method?: string;
+        hypothesis?: string;
+        evidence?: string[];
+        affectedDevices?: string[];
+        action?: string;
+        result?: string;
+        comparison?: Record<string, { before: string; after: string; improvement: string }>;
+      };
+    }>;
     deviceId: string | null;
     targetDeviceId: string | null;
+    stageDetails: {
+      detection?: {
+        ttd: number;
+        method: string;
+        anomalyType: string;
+        confidence: number;
+        metrics: Record<string, { baseline: string; current: string; deviation: string }>;
+      };
+      diagnosis?: {
+        rootCause: string;
+        confidence: number;
+        hypothesis: string;
+        evidence: string[];
+        affectedDevices: string[];
+        alternateRoutes?: number;
+      };
+      remediation?: {
+        plan: string[];
+        estimatedTime: string;
+        riskLevel: string;
+        rollbackPlan: string;
+        policyCheck: string;
+      };
+      verification?: {
+        ttr: number;
+        tttr: number;
+        successCriteria: Array<{ criterion: string; met: boolean }>;
+        metricsComparison: Record<string, { before: string; after: string; improvement: string }>;
+      };
+    };
   } = {
     active: false,
     type: null,
@@ -1117,6 +1163,7 @@ class AgentOrchestrator {
     events: [],
     deviceId: null,
     targetDeviceId: null,
+    stageDetails: {},
   };
 
   async injectFault(
@@ -1136,9 +1183,13 @@ class AgentOrchestrator {
       events: [],
       deviceId: deviceId || null,
       targetDeviceId: targetDeviceId || null,
+      stageDetails: {},
     };
 
-    this.addDemoEvent("detection", "Fault Injected", "System");
+    this.addDemoEvent("detection", "Fault Injected", "System", {
+      action: `${scenario.replace(/_/g, " ")} scenario initiated`,
+      result: "Telemetry agents beginning continuous monitoring"
+    });
 
     if (!this.isRunning) {
       this.start();
@@ -1157,14 +1208,30 @@ class AgentOrchestrator {
     };
   }
 
-  private addDemoEvent(stage: string, event: string, agent: string): void {
+  private addDemoEvent(
+    stage: string, 
+    event: string, 
+    agent: string,
+    details?: {
+      metrics?: Record<string, { baseline?: string; current?: string; threshold?: string; status?: string }>;
+      confidence?: number;
+      method?: string;
+      hypothesis?: string;
+      evidence?: string[];
+      affectedDevices?: string[];
+      action?: string;
+      result?: string;
+      comparison?: Record<string, { before: string; after: string; improvement: string }>;
+    }
+  ): void {
     this.demoScenario.events.push({
       stage,
       event,
       timestamp: new Date().toISOString(),
       agent,
+      details,
     });
-    this.logEvent("system", null, "state_changed", `Demo: ${event}`, { stage, agent });
+    this.logEvent("system", null, "status_change", `Demo: ${event}`, { stage, agent, ...details });
   }
 
   private async runDemoScenario(
@@ -1174,107 +1241,511 @@ class AgentOrchestrator {
     targetDeviceId?: string
   ): Promise<void> {
     const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    const startTime = Date.now();
 
     try {
       await delay(2000);
       this.demoScenario.stage = "detection";
       
       if (scenario === "link_failure") {
-        this.addDemoEvent("detection", "Link state changed to DOWN", "Telemetry Agent");
+        this.addDemoEvent("detection", "SNMP ifOperStatus polling detected state change", "Telemetry Agent", {
+          method: "SNMP polling every 5 seconds",
+          metrics: {
+            ifOperStatus: { baseline: "up", current: "down", status: "CRITICAL" },
+            interfaceFlaps: { baseline: "0", current: "3", threshold: ">0", status: "ANOMALY" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("detection", "link_down event detected (100% confidence)", "Anomaly Agent");
+        this.addDemoEvent("detection", "link_down anomaly confirmed", "Anomaly Agent", {
+          confidence: 100,
+          method: "Statistical baseline comparison + Pattern matching",
+          metrics: {
+            linkState: { baseline: "active", current: "down", status: "CRITICAL" },
+            packetLoss: { baseline: "0%", current: "100%", threshold: ">1%", status: "CRITICAL" }
+          }
+        });
         await delay(1000);
-        this.addDemoEvent("detection", "link_failure alert created", "System");
+        this.addDemoEvent("detection", "Alert AF-001 created: link_failure", "Alert Agent", {
+          action: "Deduplication window: 5 minutes",
+          result: "Alert escalated to RCA Agent"
+        });
+        
+        this.demoScenario.stageDetails.detection = {
+          ttd: Math.round((Date.now() - startTime) / 1000),
+          method: "SNMP ifOperStatus monitoring + Interface flap detection",
+          anomalyType: "link_failure",
+          confidence: 100,
+          metrics: {
+            ifOperStatus: { baseline: "up (1)", current: "down (2)", deviation: "State change" },
+            interfaceFlaps: { baseline: "0/min", current: "3/min", deviation: "Sudden flap" },
+            packetLoss: { baseline: "0%", current: "100%", deviation: "Complete loss" }
+          }
+        };
+        
       } else if (scenario === "port_congestion") {
-        this.addDemoEvent("detection", "Queue depth at 85% (baseline <15%)", "Telemetry Agent");
+        this.addDemoEvent("detection", "Queue depth threshold exceeded", "Telemetry Agent", {
+          method: "gNMI streaming telemetry (30s intervals)",
+          metrics: {
+            queueDepth: { baseline: "8%", current: "85%", threshold: ">30%", status: "CRITICAL" },
+            latency: { baseline: "15ms", current: "250ms", threshold: ">50ms", status: "CRITICAL" },
+            packetLoss: { baseline: "0.01%", current: "5%", threshold: ">1%", status: "CRITICAL" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("detection", "Port congestion detected (92% confidence)", "Anomaly Agent");
+        this.addDemoEvent("detection", "Port congestion anomaly detected", "Anomaly Agent", {
+          confidence: 92,
+          method: "Isolation Forest ML model + Statistical analysis",
+          evidence: [
+            "Queue depth 85%: 33.5 sigma above mean (8% baseline)",
+            "Latency 250ms: 61.7 sigma above mean (15ms baseline)",
+            "Packet loss 5%: 149.5 sigma above mean (0.01% baseline)"
+          ]
+        });
         await delay(1000);
-        this.addDemoEvent("detection", "port_congestion alert created", "System");
+        this.addDemoEvent("detection", "Alert PC-001 created: port_congestion", "Alert Agent", {
+          action: "Correlation with downstream DPU metrics",
+          result: "HIGH severity - SLA violation imminent"
+        });
+        
+        this.demoScenario.stageDetails.detection = {
+          ttd: Math.round((Date.now() - startTime) / 1000),
+          method: "Isolation Forest ML + Statistical baseline deviation",
+          anomalyType: "port_congestion",
+          confidence: 92,
+          metrics: {
+            queueDepth: { baseline: "8% (std: 2%)", current: "85%", deviation: "33.5 sigma" },
+            latency: { baseline: "15ms (std: 3ms)", current: "250ms", deviation: "61.7 sigma" },
+            packetLoss: { baseline: "0.01% (std: 0.02%)", current: "5%", deviation: "149.5 sigma" }
+          }
+        };
+        
       } else if (scenario === "dpu_overload") {
-        this.addDemoEvent("detection", "DPU CPU at 95% (baseline <70%)", "Telemetry Agent");
+        this.addDemoEvent("detection", "DPU resource utilization spike detected", "Telemetry Agent", {
+          method: "Prometheus metrics collection (30s intervals)",
+          metrics: {
+            cpuUsage: { baseline: "65%", current: "95%", threshold: ">85%", status: "CRITICAL" },
+            memoryUsage: { baseline: "70%", current: "88%", threshold: ">80%", status: "WARNING" },
+            latency: { baseline: "85ms", current: "250ms", threshold: ">100ms", status: "CRITICAL" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("detection", "DPU resource exhaustion detected (88% confidence)", "Anomaly Agent");
+        this.addDemoEvent("detection", "DPU resource exhaustion anomaly detected", "Anomaly Agent", {
+          confidence: 88,
+          method: "Baseline comparison + Trend analysis",
+          evidence: [
+            "CPU 95%: 3.75 sigma above mean (65% baseline, 8% std)",
+            "Memory 88%: 3.6 sigma above mean (70% baseline, 5% std)",
+            "Latency 250ms: 16.5 sigma above mean (85ms baseline)"
+          ]
+        });
         await delay(1000);
-        this.addDemoEvent("detection", "dpu_resource_exhaustion alert created", "System");
+        this.addDemoEvent("detection", "Alert DPU-001 created: resource_exhaustion", "Alert Agent", {
+          action: "Container workload analysis initiated",
+          result: "HIGH severity - Performance degradation detected"
+        });
+        
+        this.demoScenario.stageDetails.detection = {
+          ttd: Math.round((Date.now() - startTime) / 1000),
+          method: "Prometheus + Statistical baseline + Trend analysis",
+          anomalyType: "dpu_resource_exhaustion",
+          confidence: 88,
+          metrics: {
+            cpuUsage: { baseline: "65% (std: 8%)", current: "95%", deviation: "3.75 sigma" },
+            memoryUsage: { baseline: "70% (std: 5%)", current: "88%", deviation: "3.6 sigma" },
+            latency: { baseline: "85ms (std: 10ms)", current: "250ms", deviation: "16.5 sigma" },
+            openFiles: { baseline: "4000", current: "8234", deviation: "Near limit" }
+          }
+        };
       }
 
       await delay(2000);
       this.demoScenario.stage = "diagnosis";
 
       if (scenario === "link_failure") {
-        this.addDemoEvent("diagnosis", "Analyzing link failure location", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Root cause analysis initiated", "RCA Agent", {
+          method: "Decision tree + Topology correlation",
+          hypothesis: "Physical link failure between Spine-1:port1 and TOR-1:port1"
+        });
         await delay(2000);
-        this.addDemoEvent("diagnosis", "Computing impact path - 15 devices affected", "Topology Agent");
+        this.addDemoEvent("diagnosis", "Impact analysis completed", "Topology Agent", {
+          affectedDevices: ["DPU-1", "DPU-2", "DPU-3", "TOR-1", "Spine-1"],
+          evidence: [
+            "SNMP ifOperStatus = down (no interface errors before failure)",
+            "Sudden state change pattern = Cable/transceiver fault",
+            "LLDP neighbor table lost for affected link"
+          ],
+          action: "Computing alternate paths via network graph analysis"
+        });
         await delay(1500);
-        this.addDemoEvent("diagnosis", "Root cause confirmed (95% confidence)", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Root cause confirmed with high confidence", "RCA Agent", {
+          confidence: 98,
+          result: "Link failure: Spine-1:port1 to TOR-1:port1 - Physical layer issue"
+        });
+        
+        this.demoScenario.stageDetails.diagnosis = {
+          rootCause: "Link failure between Spine-1:port1 and TOR-1:port1",
+          confidence: 98,
+          hypothesis: "Cable/transceiver physical fault (sudden state change, no prior errors)",
+          evidence: [
+            "SNMP ifOperStatus changed from up(1) to down(2)",
+            "No interface error counters before failure",
+            "Sudden state transition (not gradual degradation)",
+            "LLDP neighbor lost on affected port"
+          ],
+          affectedDevices: ["Spine-1", "TOR-1", "DPU-1", "DPU-2", "DPU-3"],
+          alternateRoutes: 6
+        };
+        
       } else if (scenario === "port_congestion") {
-        this.addDemoEvent("diagnosis", "Analyzing traffic patterns", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Traffic pattern analysis initiated", "RCA Agent", {
+          method: "Multi-hypothesis decision tree",
+          evidence: [
+            "Hypothesis 1: Traffic surge on port (confidence: 89%)",
+            "Hypothesis 2: QoS misconfiguration (confidence: 78%)",
+            "Hypothesis 3: Hardware failure (confidence: 5%)"
+          ]
+        });
         await delay(2000);
-        this.addDemoEvent("diagnosis", "Queue depth + latency + drops = Port congestion", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Traffic surge confirmed as root cause", "RCA Agent", {
+          confidence: 89,
+          hypothesis: "Traffic surge + inadequate QoS configuration",
+          result: "Queue depth, latency, and packet loss pattern consistent with congestion"
+        });
         await delay(1500);
-        this.addDemoEvent("diagnosis", "Hypothesis confirmed (89% confidence)", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Impact scope determined", "Topology Agent", {
+          affectedDevices: ["TOR-3", "DPU-11", "DPU-12", "DPU-13", "DPU-14"],
+          action: "QoS remediation path identified"
+        });
+        
+        this.demoScenario.stageDetails.diagnosis = {
+          rootCause: "Traffic surge causing port congestion on TOR-3:port3",
+          confidence: 89,
+          hypothesis: "Traffic spike without adequate QoS policy = Queue buildup + SLA violation",
+          evidence: [
+            "Queue depth 85% (10x baseline) = Buffer exhaustion",
+            "Latency 250ms (16x baseline) = Scheduling delays",
+            "Packet loss 5% = Tail drops on lower priority traffic",
+            "No hardware errors = Software/traffic issue confirmed"
+          ],
+          affectedDevices: ["TOR-3", "DPU-11", "DPU-12", "DPU-13", "DPU-14"]
+        };
+        
       } else if (scenario === "dpu_overload") {
-        this.addDemoEvent("diagnosis", "Analyzing workload patterns", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Workload pattern analysis initiated", "RCA Agent", {
+          method: "Container resource profiling + Historical comparison",
+          evidence: [
+            "New container 'heavy_processing' deployed at T=0",
+            "CPU requirement: 45% (exceeded available headroom)",
+            "Context switch rate: 8x normal"
+          ]
+        });
         await delay(2000);
-        this.addDemoEvent("diagnosis", "CPU saturation = Workload imbalance", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Workload imbalance confirmed", "RCA Agent", {
+          confidence: 85,
+          hypothesis: "CPU saturation from workload imbalance",
+          result: "Container A + Container B total demand exceeds DPU capacity"
+        });
         await delay(1500);
-        this.addDemoEvent("diagnosis", "Root cause confirmed (85% confidence)", "RCA Agent");
+        this.addDemoEvent("diagnosis", "Migration target identified", "Topology Agent", {
+          affectedDevices: ["DPU-5", "DPU-8"],
+          action: "DPU-8 selected as migration target (CPU 45%, Memory 52%)"
+        });
+        
+        this.demoScenario.stageDetails.diagnosis = {
+          rootCause: "DPU-5 overloaded due to workload imbalance",
+          confidence: 85,
+          hypothesis: "New 'heavy_processing' container exceeded available CPU headroom",
+          evidence: [
+            "CPU jumped from 65% to 95% after container deployment",
+            "Memory pressure increased to 88%",
+            "Latency spiked to 250ms (context switching overhead)",
+            "Open file descriptors near system limit (8234/10000)"
+          ],
+          affectedDevices: ["DPU-5", "DPU-8 (migration target)"]
+        };
       }
 
       await delay(2000);
       this.demoScenario.stage = "remediation";
 
       if (scenario === "link_failure") {
-        this.addDemoEvent("remediation", "Finding alternate path via topology.resolve", "Remediation Agent");
-        await delay(2000);
-        this.addDemoEvent("remediation", "Alternate route identified", "Remediation Agent");
+        this.addDemoEvent("remediation", "Remediation plan generated", "Remediation Agent", {
+          action: "Wait for OSPF/BGP auto-convergence (preferred) + Monitor routing tables"
+        });
         await delay(1500);
-        this.addDemoEvent("remediation", "Enabling alternate route - OSPF/BGP auto-converging", "Remediation Agent");
-        await delay(3000);
-        this.addDemoEvent("remediation", "Routing protocol convergence in progress", "Remediation Agent");
+        this.addDemoEvent("remediation", "Policy validation completed", "Compliance Agent", {
+          evidence: [
+            "Allow routing protocol convergence: APPROVED",
+            "Allow automatic failover: APPROVED",
+            "Allowed services: [BGP, OSPF, IS-IS]"
+          ],
+          result: "Risk level: LOW - Routing protocols will auto-converge"
+        });
+        await delay(1500);
+        this.addDemoEvent("remediation", "Alternate path activation initiated", "Remediation Agent", {
+          action: "6 alternate paths available via Spine-2 through Spine-7",
+          result: "BGP UPDATE messages being propagated"
+        });
+        await delay(2000);
+        this.addDemoEvent("remediation", "Routing convergence in progress", "Execution Agent", {
+          metrics: {
+            bgpState: { current: "UPDATE_SENT", status: "IN_PROGRESS" },
+            ospfCost: { baseline: "10", current: "10 (no change needed)" }
+          },
+          action: "Monitoring convergence timer (60s max wait)"
+        });
+        
+        this.demoScenario.stageDetails.remediation = {
+          plan: [
+            "Step 1: Monitor BGP for convergence start",
+            "Step 2: Wait for OSPF/BGP route updates (30-60s typical)",
+            "Step 3: Verify new paths active in routing table",
+            "Step 4: Confirm traffic flowing via alternate path"
+          ],
+          estimatedTime: "45 seconds",
+          riskLevel: "LOW",
+          rollbackPlan: "No action needed (routing auto-recovers)",
+          policyCheck: "APPROVED - Automatic failover allowed per network policy"
+        };
+        
       } else if (scenario === "port_congestion") {
-        this.addDemoEvent("remediation", "Adjusting QoS buffer thresholds (+20%)", "Remediation Agent");
-        await delay(2000);
-        this.addDemoEvent("remediation", "Policy validation passed", "Compliance Agent");
+        this.addDemoEvent("remediation", "QoS remediation plan generated", "Remediation Agent", {
+          action: "Apply priority_traffic QoS profile to TOR-3:port3"
+        });
         await delay(1500);
-        this.addDemoEvent("remediation", "Reconfiguring QoS policy to priority_traffic", "Remediation Agent");
+        this.addDemoEvent("remediation", "Policy validation completed", "Compliance Agent", {
+          evidence: [
+            "Allow QoS configuration changes: APPROVED",
+            "Policy profile 'priority_traffic': APPROVED",
+            "Non-disruptive change: CONFIRMED"
+          ],
+          result: "Risk level: LOW"
+        });
+        await delay(1500);
+        this.addDemoEvent("remediation", "QoS configuration applied", "Execution Agent", {
+          action: "Adjusting buffer thresholds and traffic classes",
+          metrics: {
+            queueLimit: { baseline: "unlimited", current: "20%", status: "CONFIGURED" },
+            priorityBandwidth: { current: "60%", status: "CONFIGURED" },
+            ecnThreshold: { current: "15%", status: "ENABLED" }
+          }
+        });
+        await delay(1500);
+        this.addDemoEvent("remediation", "DSCP marking and ECN enabled", "Execution Agent", {
+          evidence: [
+            "Class 1 (priority): 60% bandwidth, low-latency queue, DSCP EF/AF41",
+            "Class 2 (best-effort): 30% bandwidth, standard queue",
+            "Class 3 (background): 10% bandwidth, drop-eligible",
+            "ECN marking threshold: 15%"
+          ],
+          result: "QoS policy applied successfully"
+        });
+        
+        this.demoScenario.stageDetails.remediation = {
+          plan: [
+            "Step 1: Apply QoS profile 'priority_traffic'",
+            "Step 2: Set queue limit to 20% (prevent buffer exhaustion)",
+            "Step 3: Configure traffic classes (priority/best-effort/background)",
+            "Step 4: Enable ECN for graceful congestion signaling",
+            "Step 5: Verify metrics after 30s"
+          ],
+          estimatedTime: "15 seconds",
+          riskLevel: "LOW",
+          rollbackPlan: "Revert QoS profile to 'default'",
+          policyCheck: "APPROVED - QoS changes validated against network policies"
+        };
+        
       } else if (scenario === "dpu_overload") {
-        this.addDemoEvent("remediation", "Identifying target DPU with available capacity", "Remediation Agent");
-        await delay(2000);
-        this.addDemoEvent("remediation", targetDeviceId ? `Target ${targetDeviceId} selected` : "Target DPU identified (CPU 45%, Memory 52%)", "Remediation Agent");
+        this.addDemoEvent("remediation", "Workload migration plan generated", "Remediation Agent", {
+          action: "Live migrate container workload from DPU-5 to DPU-8"
+        });
         await delay(1500);
-        this.addDemoEvent("remediation", "Live migration of container workload initiated", "Remediation Agent");
+        this.addDemoEvent("remediation", "Migration target validated", "Remediation Agent", {
+          metrics: {
+            targetCpu: { current: "45%", status: "AVAILABLE" },
+            targetMemory: { current: "52%", status: "AVAILABLE" },
+            networkLatency: { current: "2ms", status: "ACCEPTABLE" }
+          },
+          result: "DPU-8 has sufficient capacity for workload migration"
+        });
+        await delay(1500);
+        this.addDemoEvent("remediation", "Policy validation completed", "Compliance Agent", {
+          evidence: [
+            "Workload migration allowed: APPROVED",
+            "Target DPU meets requirements: CONFIRMED",
+            "Migration window: No blackout restrictions"
+          ],
+          result: "Risk level: MEDIUM (live migration)"
+        });
+        await delay(1500);
+        this.addDemoEvent("remediation", "Live migration initiated", "Execution Agent", {
+          action: "Container 'heavy_processing' migrating to DPU-8",
+          result: "Memory checkpoint created, transferring state..."
+        });
         await delay(2000);
-        this.addDemoEvent("remediation", "Adjusting offload rules for optimal distribution", "Remediation Agent");
+        this.addDemoEvent("remediation", "Offload rules adjusted", "Execution Agent", {
+          action: "Traffic steering rules updated for new DPU location",
+          result: "Migration completed, traffic flowing to DPU-8"
+        });
+        
+        this.demoScenario.stageDetails.remediation = {
+          plan: [
+            "Step 1: Identify target DPU with available capacity",
+            "Step 2: Validate migration target meets requirements",
+            "Step 3: Create container checkpoint on source DPU",
+            "Step 4: Transfer container state to target DPU",
+            "Step 5: Update traffic steering/offload rules",
+            "Step 6: Verify workload running on target DPU"
+          ],
+          estimatedTime: "45 seconds",
+          riskLevel: "MEDIUM",
+          rollbackPlan: "Migrate workload back to original DPU",
+          policyCheck: "APPROVED - Live migration validated against policies"
+        };
       }
 
       await delay(3000);
       this.demoScenario.stage = "verification";
+      const verificationStartTime = Date.now();
 
       if (scenario === "link_failure") {
-        this.addDemoEvent("verification", "Routing convergence completed (45 seconds)", "Verification Agent");
-        await delay(2000);
-        this.addDemoEvent("verification", "Traffic flowing via alternate path", "Verification Agent");
+        this.addDemoEvent("verification", "Post-remediation metrics collection", "Verification Agent", {
+          comparison: {
+            routingPath: { before: "Spine-1 -> TOR-1", after: "Spine-2 -> TOR-1", improvement: "Alternate path active" },
+            latency: { before: "2ms", after: "2.8ms", improvement: "+0.8ms (acceptable overhead)" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("verification", "Zero packet loss after convergence", "Verification Agent");
+        this.addDemoEvent("verification", "Service restoration confirmed", "Verification Agent", {
+          comparison: {
+            packetLoss: { before: "100%", after: "0%", improvement: "Full recovery" },
+            bgpState: { before: "DOWN", after: "ESTABLISHED", improvement: "Converged" }
+          },
+          result: "All success criteria met"
+        });
+        await delay(1500);
+        this.addDemoEvent("verification", "Verification complete", "Verification Agent", {
+          confidence: 99,
+          evidence: [
+            "Service restored: YES",
+            "Packet loss <0.5%: YES (0%)",
+            "Latency within 50% baseline: YES (2.8ms vs 2ms)",
+            "Route converged: YES"
+          ]
+        });
+        
+        this.demoScenario.stageDetails.verification = {
+          ttr: Math.round((Date.now() - startTime) / 1000) - 5,
+          tttr: Math.round((Date.now() - startTime) / 1000),
+          successCriteria: [
+            { criterion: "Service restored", met: true },
+            { criterion: "Packet loss < 0.5%", met: true },
+            { criterion: "Latency within 50% of baseline", met: true },
+            { criterion: "Routing converged", met: true }
+          ],
+          metricsComparison: {
+            latency: { before: "2ms", after: "2.8ms", improvement: "+0.8ms via longer path" },
+            packetLoss: { before: "0%", after: "0%", improvement: "Recovered" },
+            routePath: { before: "Spine-1", after: "Spine-2", improvement: "Alternate path" }
+          }
+        };
+        
       } else if (scenario === "port_congestion") {
-        this.addDemoEvent("verification", "Queue depth: 85% -> 12% (recovered)", "Verification Agent");
+        this.addDemoEvent("verification", "Metrics stabilizing after QoS application", "Verification Agent", {
+          comparison: {
+            queueDepth: { before: "85%", after: "18%", improvement: "78% reduction" },
+            latency: { before: "250ms", after: "42ms", improvement: "83% reduction" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("verification", "Latency: 250ms -> 45ms (normalized)", "Verification Agent");
+        this.addDemoEvent("verification", "SLA compliance restored", "Verification Agent", {
+          comparison: {
+            packetLoss: { before: "5%", after: "<0.1%", improvement: "98% reduction" },
+            prioritySla: { before: "VIOLATED", after: "MET", improvement: "42ms < 50ms target" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("verification", "Packet loss: 5% -> <0.1%", "Verification Agent");
+        this.addDemoEvent("verification", "Verification complete - All criteria met", "Verification Agent", {
+          confidence: 98,
+          evidence: [
+            "Priority traffic SLA (latency <50ms): MET (42ms)",
+            "Packet loss <0.1%: MET",
+            "Queue depth normalized: YES (18%)",
+            "ECN signaling active: YES"
+          ]
+        });
+        
+        this.demoScenario.stageDetails.verification = {
+          ttr: Math.round((Date.now() - startTime) / 1000) - 5,
+          tttr: Math.round((Date.now() - startTime) / 1000),
+          successCriteria: [
+            { criterion: "Priority traffic latency < 50ms", met: true },
+            { criterion: "Packet loss < 0.1%", met: true },
+            { criterion: "Queue depth < 25%", met: true },
+            { criterion: "ECN enabled and active", met: true }
+          ],
+          metricsComparison: {
+            queueDepth: { before: "85%", after: "18%", improvement: "78% reduction" },
+            latency: { before: "250ms", after: "42ms", improvement: "83% reduction" },
+            packetLoss: { before: "5%", after: "<0.1%", improvement: "98% reduction" }
+          }
+        };
+        
       } else if (scenario === "dpu_overload") {
-        this.addDemoEvent("verification", "CPU usage: 95% -> 65% (normalized)", "Verification Agent");
+        this.addDemoEvent("verification", "Post-migration metrics collection", "Verification Agent", {
+          comparison: {
+            dpuCpu: { before: "95%", after: "65%", improvement: "32% reduction on DPU-5" },
+            targetCpu: { before: "45%", after: "72%", improvement: "Workload transferred" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("verification", "Latency: 250ms -> 80ms (recovered)", "Verification Agent");
+        this.addDemoEvent("verification", "Latency normalized", "Verification Agent", {
+          comparison: {
+            latency: { before: "250ms", after: "82ms", improvement: "67% reduction" },
+            memoryUsage: { before: "88%", after: "68%", improvement: "23% reduction" }
+          }
+        });
         await delay(1500);
-        this.addDemoEvent("verification", "No service disruption during migration", "Verification Agent");
+        this.addDemoEvent("verification", "Verification complete - Migration successful", "Verification Agent", {
+          confidence: 95,
+          evidence: [
+            "CPU < 85%: MET (65% on DPU-5)",
+            "Latency < 100ms: MET (82ms)",
+            "Workload running on target: CONFIRMED",
+            "Zero service disruption during migration: CONFIRMED"
+          ]
+        });
+        
+        this.demoScenario.stageDetails.verification = {
+          ttr: Math.round((Date.now() - startTime) / 1000) - 5,
+          tttr: Math.round((Date.now() - startTime) / 1000),
+          successCriteria: [
+            { criterion: "Source CPU < 85%", met: true },
+            { criterion: "Latency < 100ms", met: true },
+            { criterion: "Workload running on target", met: true },
+            { criterion: "Zero service disruption", met: true }
+          ],
+          metricsComparison: {
+            cpuUsage: { before: "95%", after: "65%", improvement: "32% reduction" },
+            latency: { before: "250ms", after: "82ms", improvement: "67% reduction" },
+            memoryUsage: { before: "88%", after: "68%", improvement: "23% reduction" }
+          }
+        };
       }
 
       await delay(2000);
       this.demoScenario.stage = "resolved";
-      this.addDemoEvent("resolved", "Incident resolved - System healthy", "System");
+      const totalTime = Math.round((Date.now() - startTime) / 1000);
+      
+      this.addDemoEvent("resolved", "Incident resolved - System healthy", "System", {
+        result: `Total resolution time: ${totalTime} seconds`,
+        evidence: [
+          `TTD: ${this.demoScenario.stageDetails.detection?.ttd || 5}s (target: <30s)`,
+          `TTR: ${this.demoScenario.stageDetails.verification?.ttr || totalTime - 5}s (target: <60s)`,
+          `TTTR: ${totalTime}s (target: <120s)`,
+          "Human intervention: ZERO (fully autonomous)"
+        ]
+      });
 
     } catch (error) {
       console.error("Demo scenario error:", error);
@@ -1296,8 +1767,9 @@ class AgentOrchestrator {
       events: [],
       deviceId: null,
       targetDeviceId: null,
+      stageDetails: {},
     };
-    this.logEvent("system", null, "state_changed", "Demo scenario reset");
+    this.logEvent("system", null, "status_change", "Demo scenario reset");
   }
 }
 

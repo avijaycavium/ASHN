@@ -13,15 +13,86 @@ import {
   Shield,
   AlertCircle,
   Loader2,
-  Zap
+  Zap,
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  AlertTriangle,
+  Clock,
+  Target,
+  List,
+  ArrowRight,
+  CheckCircle,
+  XCircle
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { Device } from "@shared/schema";
+
+interface MetricDetail {
+  baseline?: string;
+  current?: string;
+  threshold?: string;
+  status?: string;
+  deviation?: string;
+}
+
+interface EventDetails {
+  metrics?: Record<string, MetricDetail>;
+  confidence?: number;
+  method?: string;
+  hypothesis?: string;
+  evidence?: string[];
+  affectedDevices?: string[];
+  action?: string;
+  result?: string;
+  comparison?: Record<string, { before: string; after: string; improvement: string }>;
+}
+
+interface DemoEvent {
+  stage: string;
+  event: string;
+  timestamp: string;
+  agent: string;
+  details?: EventDetails;
+}
+
+interface StageDetails {
+  detection?: {
+    ttd: number;
+    method: string;
+    anomalyType: string;
+    confidence: number;
+    metrics: Record<string, { baseline: string; current: string; deviation: string }>;
+  };
+  diagnosis?: {
+    rootCause: string;
+    confidence: number;
+    hypothesis: string;
+    evidence: string[];
+    affectedDevices: string[];
+    alternateRoutes?: number;
+  };
+  remediation?: {
+    plan: string[];
+    estimatedTime: string;
+    riskLevel: string;
+    rollbackPlan: string;
+    policyCheck: string;
+  };
+  verification?: {
+    ttr: number;
+    tttr: number;
+    successCriteria: Array<{ criterion: string; met: boolean }>;
+    metricsComparison: Record<string, { before: string; after: string; improvement: string }>;
+  };
+}
 
 interface DemoScenarioStatus {
   active: boolean;
@@ -29,9 +100,10 @@ interface DemoScenarioStatus {
   stage: "idle" | "detection" | "diagnosis" | "remediation" | "verification" | "resolved";
   incidentId: string | null;
   startedAt: string | null;
-  events: Array<{ stage: string; event: string; timestamp: string; agent: string }>;
+  events: DemoEvent[];
   deviceId: string | null;
   targetDeviceId: string | null;
+  stageDetails: StageDetails;
 }
 
 const scenarios = [
@@ -42,6 +114,7 @@ const scenarios = [
     icon: <Link2Off className="h-5 w-5" />,
     color: "text-status-busy",
     expectedDuration: "~30 seconds",
+    metrics: ["ifOperStatus", "packetLoss", "interfaceFlaps"],
   },
   {
     id: "port_congestion",
@@ -50,6 +123,7 @@ const scenarios = [
     icon: <Gauge className="h-5 w-5" />,
     color: "text-status-away",
     expectedDuration: "~25 seconds",
+    metrics: ["queueDepth", "latency", "packetLoss"],
   },
   {
     id: "dpu_overload",
@@ -58,6 +132,7 @@ const scenarios = [
     icon: <Cpu className="h-5 w-5" />,
     color: "text-primary",
     expectedDuration: "~35 seconds",
+    metrics: ["cpuUsage", "memoryUsage", "latency"],
   },
 ];
 
@@ -104,42 +179,185 @@ function StageIndicator({ currentStage }: { currentStage: DemoScenarioStatus["st
   );
 }
 
-function EventTimeline({ events }: { events: DemoScenarioStatus["events"] }) {
+function MetricsDisplay({ metrics }: { metrics?: Record<string, MetricDetail> }) {
+  if (!metrics || Object.keys(metrics).length === 0) return null;
+  
   return (
-    <ScrollArea className="h-[400px]">
+    <div className="mt-2 space-y-1.5">
+      {Object.entries(metrics).map(([key, value]) => (
+        <div 
+          key={key} 
+          className="flex items-center justify-between text-xs bg-muted/50 rounded px-2 py-1.5"
+        >
+          <span className="font-mono text-muted-foreground">{key}</span>
+          <div className="flex items-center gap-2">
+            {value.baseline && (
+              <span className="text-muted-foreground">
+                baseline: <span className="text-foreground">{value.baseline}</span>
+              </span>
+            )}
+            {value.current && (
+              <>
+                <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                <span className={cn(
+                  value.status === "CRITICAL" && "text-status-busy font-medium",
+                  value.status === "WARNING" && "text-status-away font-medium",
+                  value.status === "ANOMALY" && "text-orange-500 font-medium"
+                )}>
+                  {value.current}
+                </span>
+              </>
+            )}
+            {value.threshold && (
+              <Badge variant="outline" className="text-xs h-5">
+                threshold: {value.threshold}
+              </Badge>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ComparisonDisplay({ comparison }: { comparison?: Record<string, { before: string; after: string; improvement: string }> }) {
+  if (!comparison || Object.keys(comparison).length === 0) return null;
+  
+  return (
+    <div className="mt-2 space-y-1.5">
+      {Object.entries(comparison).map(([key, value]) => (
+        <div 
+          key={key} 
+          className="flex items-center justify-between text-xs bg-status-online/10 rounded px-2 py-1.5"
+        >
+          <span className="font-mono text-muted-foreground">{key}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-status-busy">{value.before}</span>
+            <ArrowRight className="h-3 w-3 text-status-online" />
+            <span className="text-status-online font-medium">{value.after}</span>
+            <Badge className="bg-status-online/20 text-status-online text-xs h-5">
+              {value.improvement}
+            </Badge>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EventTimeline({ events }: { events: DemoEvent[] }) {
+  return (
+    <ScrollArea className="h-[500px]">
       <div className="space-y-3 pr-4">
         {events.map((event, index) => {
           const stageConf = stageConfig[event.stage as keyof typeof stageConfig] || stageConfig.idle;
+          const hasDetails = event.details && (
+            event.details.metrics || 
+            event.details.evidence || 
+            event.details.comparison ||
+            event.details.confidence ||
+            event.details.method
+          );
+          
           return (
             <div 
               key={index} 
               className={cn(
-                "flex gap-3 p-3 rounded-md border border-border bg-card/50 animate-in fade-in slide-in-from-left-2",
+                "p-3 rounded-md border border-border bg-card/50 animate-in fade-in slide-in-from-left-2",
                 index === events.length - 1 && "ring-1 ring-primary"
               )}
               style={{ animationDelay: `${index * 50}ms` }}
             >
-              <div className={cn(
-                "h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0",
-                stageConf.color,
-                "text-white"
-              )}>
-                {stageConf.icon || <Zap className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{event.event}</span>
-                  <Badge variant="outline" className="text-xs">
-                    {event.agent}
-                  </Badge>
+              <div className="flex gap-3">
+                <div className={cn(
+                  "h-8 w-8 rounded-full flex items-center justify-center flex-shrink-0",
+                  stageConf.color,
+                  "text-white"
+                )}>
+                  {stageConf.icon || <Zap className="h-4 w-4" />}
                 </div>
-                <div className="flex items-center gap-2 mt-1">
-                  <Badge className={cn("text-xs", stageConf.color, "text-white")}>
-                    {event.stage}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-sm">{event.event}</span>
+                    <Badge variant="outline" className="text-xs">
+                      {event.agent}
+                    </Badge>
+                    {event.details?.confidence !== undefined && (
+                      <Badge className="bg-primary/20 text-primary text-xs">
+                        {event.details.confidence}% confidence
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <Badge className={cn("text-xs", stageConf.color, "text-white")}>
+                      {event.stage}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  
+                  {hasDetails && (
+                    <div className="mt-3 pt-2 border-t border-border/50">
+                      {event.details?.method && (
+                        <div className="flex items-start gap-2 text-xs mb-2">
+                          <Activity className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <span><span className="text-muted-foreground">Method:</span> {event.details.method}</span>
+                        </div>
+                      )}
+                      
+                      {event.details?.hypothesis && (
+                        <div className="flex items-start gap-2 text-xs mb-2">
+                          <Target className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <span><span className="text-muted-foreground">Hypothesis:</span> {event.details.hypothesis}</span>
+                        </div>
+                      )}
+                      
+                      {event.details?.action && (
+                        <div className="flex items-start gap-2 text-xs mb-2">
+                          <Wrench className="h-3.5 w-3.5 text-muted-foreground mt-0.5 flex-shrink-0" />
+                          <span><span className="text-muted-foreground">Action:</span> {event.details.action}</span>
+                        </div>
+                      )}
+                      
+                      {event.details?.result && (
+                        <div className="flex items-start gap-2 text-xs mb-2">
+                          <CheckCircle className="h-3.5 w-3.5 text-status-online mt-0.5 flex-shrink-0" />
+                          <span><span className="text-muted-foreground">Result:</span> {event.details.result}</span>
+                        </div>
+                      )}
+                      
+                      {event.details?.evidence && event.details.evidence.length > 0 && (
+                        <div className="mt-2">
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                            <List className="h-3.5 w-3.5" />
+                            <span>Evidence:</span>
+                          </div>
+                          <ul className="space-y-0.5 ml-5">
+                            {event.details.evidence.map((ev, i) => (
+                              <li key={i} className="text-xs text-muted-foreground list-disc">
+                                {ev}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {event.details?.affectedDevices && event.details.affectedDevices.length > 0 && (
+                        <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                          <span className="text-xs text-muted-foreground">Affected:</span>
+                          {event.details.affectedDevices.map((device, i) => (
+                            <Badge key={i} variant="outline" className="text-xs">
+                              {device}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <MetricsDisplay metrics={event.details?.metrics} />
+                      <ComparisonDisplay comparison={event.details?.comparison} />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -153,6 +371,207 @@ function EventTimeline({ events }: { events: DemoScenarioStatus["events"] }) {
         )}
       </div>
     </ScrollArea>
+  );
+}
+
+function StageDetailsPanel({ stageDetails, currentStage }: { stageDetails: StageDetails; currentStage: string }) {
+  const stages = ["detection", "diagnosis", "remediation", "verification"] as const;
+  const rawIndex = stages.indexOf(currentStage as typeof stages[number]);
+  const currentIndex = currentStage === "resolved" ? stages.length : rawIndex;
+  
+  return (
+    <div className="space-y-4">
+      {stageDetails.detection && currentIndex >= 0 && (
+        <Card className="border-status-away/30">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-status-away flex items-center justify-center">
+                <Search className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-sm">Detection Phase</CardTitle>
+                <CardDescription className="text-xs">
+                  TTD: {stageDetails.detection.ttd}s | Confidence: {stageDetails.detection.confidence}%
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Detection Method</p>
+              <p className="text-sm">{stageDetails.detection.method}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Anomaly Type</p>
+              <Badge variant="destructive">{stageDetails.detection.anomalyType.replace(/_/g, " ")}</Badge>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">Metrics Deviation</p>
+              <div className="space-y-1.5">
+                {Object.entries(stageDetails.detection.metrics).map(([key, value]) => (
+                  <div key={key} className="grid grid-cols-4 gap-2 text-xs bg-muted/50 rounded px-2 py-1.5">
+                    <span className="font-mono">{key}</span>
+                    <span className="text-muted-foreground">{value.baseline}</span>
+                    <span className="text-status-busy font-medium">{value.current}</span>
+                    <span className="text-orange-500">{value.deviation}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {stageDetails.diagnosis && currentIndex >= 1 && (
+        <Card className="border-primary/30">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-primary flex items-center justify-center">
+                <Bot className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-sm">Diagnosis Phase</CardTitle>
+                <CardDescription className="text-xs">
+                  Confidence: {stageDetails.diagnosis.confidence}%
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Root Cause</p>
+              <p className="text-sm font-medium">{stageDetails.diagnosis.rootCause}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Hypothesis</p>
+              <p className="text-sm">{stageDetails.diagnosis.hypothesis}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Evidence</p>
+              <ul className="space-y-0.5">
+                {stageDetails.diagnosis.evidence.map((ev, i) => (
+                  <li key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                    <CheckCircle className="h-3 w-3 text-status-online mt-0.5 flex-shrink-0" />
+                    {ev}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Affected:</span>
+              {stageDetails.diagnosis.affectedDevices.map((device, i) => (
+                <Badge key={i} variant="outline" className="text-xs">
+                  {device}
+                </Badge>
+              ))}
+            </div>
+            {stageDetails.diagnosis.alternateRoutes !== undefined && (
+              <Badge className="bg-status-online/20 text-status-online">
+                {stageDetails.diagnosis.alternateRoutes} alternate routes available
+              </Badge>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      
+      {stageDetails.remediation && currentIndex >= 2 && (
+        <Card className="border-orange-500/30">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-orange-500 flex items-center justify-center">
+                <Wrench className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-sm">Remediation Phase</CardTitle>
+                <CardDescription className="text-xs">
+                  Est. Time: {stageDetails.remediation.estimatedTime} | Risk: {stageDetails.remediation.riskLevel}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Remediation Plan</p>
+              <ol className="space-y-1">
+                {stageDetails.remediation.plan.map((step, i) => (
+                  <li key={i} className="text-xs flex items-start gap-2">
+                    <span className="font-mono text-muted-foreground">{i + 1}.</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Policy Check</p>
+                <Badge className="bg-status-online/20 text-status-online text-xs">
+                  {stageDetails.remediation.policyCheck}
+                </Badge>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground mb-1">Rollback Plan</p>
+                <p className="text-xs">{stageDetails.remediation.rollbackPlan}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {stageDetails.verification && currentIndex >= 3 && (
+        <Card className="border-status-online/30">
+          <CardHeader className="pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-full bg-status-online flex items-center justify-center">
+                <Shield className="h-4 w-4 text-white" />
+              </div>
+              <div>
+                <CardTitle className="text-sm">Verification Phase</CardTitle>
+                <CardDescription className="text-xs">
+                  TTR: {stageDetails.verification.ttr}s | TTTR: {stageDetails.verification.tttr}s
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">Success Criteria</p>
+              <div className="space-y-1">
+                {stageDetails.verification.successCriteria.map((criteria, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    {criteria.met ? (
+                      <CheckCircle className="h-3.5 w-3.5 text-status-online" />
+                    ) : (
+                      <XCircle className="h-3.5 w-3.5 text-status-busy" />
+                    )}
+                    <span className={criteria.met ? "text-foreground" : "text-status-busy"}>
+                      {criteria.criterion}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground mb-2">Metrics Recovery</p>
+              <div className="space-y-1.5">
+                {Object.entries(stageDetails.verification.metricsComparison).map(([key, value]) => (
+                  <div key={key} className="flex items-center justify-between text-xs bg-status-online/10 rounded px-2 py-1.5">
+                    <span className="font-mono">{key}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-status-busy">{value.before}</span>
+                      <ArrowRight className="h-3 w-3 text-status-online" />
+                      <span className="text-status-online font-medium">{value.after}</span>
+                      <Badge className="bg-status-online text-white text-xs h-5">
+                        {value.improvement}
+                      </Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
   );
 }
 
@@ -271,7 +690,14 @@ export default function DemoConsolePage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground mb-4">{scenario.description}</p>
+                <p className="text-sm text-muted-foreground mb-3">{scenario.description}</p>
+                <div className="flex flex-wrap gap-1 mb-4">
+                  {scenario.metrics.map((metric) => (
+                    <Badge key={metric} variant="outline" className="text-xs">
+                      {metric}
+                    </Badge>
+                  ))}
+                </div>
                 <Button 
                   className="w-full gap-1.5"
                   disabled={isRunning || injectFaultMutation.isPending}
@@ -297,12 +723,52 @@ export default function DemoConsolePage() {
           <div className="space-y-4">
             <StageIndicator currentStage={demoStatus?.stage || "idle"} />
             
+            {isResolved && demoStatus?.stageDetails?.verification && (
+              <Card className="border-status-online bg-status-online/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="h-12 w-12 rounded-full bg-status-online flex items-center justify-center">
+                        <CheckCircle2 className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-status-online">Incident Resolved Successfully</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Zero human intervention - Fully autonomous remediation
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-status-online">
+                          {demoStatus.stageDetails.detection?.ttd || 5}s
+                        </p>
+                        <p className="text-xs text-muted-foreground">TTD</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-status-online">
+                          {demoStatus.stageDetails.verification.ttr}s
+                        </p>
+                        <p className="text-xs text-muted-foreground">TTR</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-status-online">
+                          {demoStatus.stageDetails.verification.tttr}s
+                        </p>
+                        <p className="text-xs text-muted-foreground">TTTR</p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">Live Event Timeline</CardTitle>
                   <CardDescription>
-                    Real-time events from the agentic framework
+                    Real-time events from the agentic framework with detailed metrics
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -312,89 +778,27 @@ export default function DemoConsolePage() {
 
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Scenario Details</CardTitle>
+                  <CardTitle className="text-base">Stage Analysis</CardTitle>
+                  <CardDescription>
+                    Detailed breakdown of each autonomous healing phase
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Scenario Type</p>
-                      <p className="font-medium">{demoStatus?.type?.replace(/_/g, " ") || "—"}</p>
+                <CardContent>
+                  <ScrollArea className="h-[500px]">
+                    <div className="pr-4">
+                      {demoStatus?.stageDetails && Object.keys(demoStatus.stageDetails).length > 0 ? (
+                        <StageDetailsPanel 
+                          stageDetails={demoStatus.stageDetails} 
+                          currentStage={demoStatus.stage} 
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                          <Clock className="h-8 w-8 mb-2" />
+                          <p>Stage details will appear as the scenario progresses</p>
+                        </div>
+                      )}
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Incident ID</p>
-                      <p className="font-mono text-sm">{demoStatus?.incidentId || "—"}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Current Stage</p>
-                      <Badge className={cn(
-                        stageConfig[demoStatus?.stage || "idle"].color,
-                        "text-white"
-                      )}>
-                        {stageConfig[demoStatus?.stage || "idle"].label}
-                      </Badge>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Started At</p>
-                      <p className="text-sm">
-                        {demoStatus?.startedAt 
-                          ? new Date(demoStatus.startedAt).toLocaleTimeString() 
-                          : "—"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="pt-4 border-t border-border">
-                    <h4 className="text-sm font-medium mb-3">Agentic Flow</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "h-2 w-2 rounded-full",
-                          demoStatus?.stage === "detection" || 
-                          (demoStatus?.events?.some(e => e.stage === "detection")) 
-                            ? "bg-status-online" : "bg-muted"
-                        )} />
-                        <span>Detection: Telemetry + Anomaly Agents</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "h-2 w-2 rounded-full",
-                          demoStatus?.stage === "diagnosis" || 
-                          (demoStatus?.events?.some(e => e.stage === "diagnosis")) 
-                            ? "bg-status-online" : "bg-muted"
-                        )} />
-                        <span>Diagnosis: RCA + Topology Agents</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "h-2 w-2 rounded-full",
-                          demoStatus?.stage === "remediation" || 
-                          (demoStatus?.events?.some(e => e.stage === "remediation")) 
-                            ? "bg-status-online" : "bg-muted"
-                        )} />
-                        <span>Remediation: Remediation + Compliance Agents</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "h-2 w-2 rounded-full",
-                          demoStatus?.stage === "verification" || demoStatus?.stage === "resolved"
-                            ? "bg-status-online" : "bg-muted"
-                        )} />
-                        <span>Verification: Verification Agent</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {isResolved && (
-                    <div className="pt-4 border-t border-border">
-                      <div className="flex items-center gap-2 text-status-online">
-                        <CheckCircle2 className="h-5 w-5" />
-                        <span className="font-medium">Incident Resolved Successfully</span>
-                      </div>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        The agentic framework has successfully detected, diagnosed, and remediated the fault.
-                      </p>
-                    </div>
-                  )}
+                  </ScrollArea>
                 </CardContent>
               </Card>
             </div>
@@ -408,7 +812,8 @@ export default function DemoConsolePage() {
               <h3 className="text-lg font-medium mb-2">Select a Scenario to Begin</h3>
               <p className="text-sm text-muted-foreground text-center max-w-md">
                 Choose one of the scenarios above to inject a fault into the network. 
-                The agentic framework will automatically detect and remediate the issue.
+                The agentic framework will automatically detect and remediate the issue, 
+                showing you detailed metrics and analysis at each stage.
               </p>
             </CardContent>
           </Card>
