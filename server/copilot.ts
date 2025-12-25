@@ -1,6 +1,68 @@
 import OpenAI from "openai";
+import { z } from "zod";
 import { getGNS3Client, getGNS3Config } from "./gns3";
 import type { GNS3Node, GNS3Link, GNS3Template } from "./gns3";
+
+const CreateNodeAction = z.object({
+  action: z.literal("create_node"),
+  template: z.string().min(1),
+  name: z.string().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+});
+
+const DeleteNodeAction = z.object({
+  action: z.literal("delete_node"),
+  node_id: z.string().min(1),
+});
+
+const StartNodeAction = z.object({
+  action: z.literal("start_node"),
+  node_id: z.string().min(1),
+});
+
+const StopNodeAction = z.object({
+  action: z.literal("stop_node"),
+  node_id: z.string().min(1),
+});
+
+const CreateLinkAction = z.object({
+  action: z.literal("create_link"),
+  source_node: z.string().min(1),
+  source_port: z.number().int().min(0).default(0),
+  target_node: z.string().min(1),
+  target_port: z.number().int().min(0).default(0),
+});
+
+const DeleteLinkAction = z.object({
+  action: z.literal("delete_link"),
+  link_id: z.string().min(1),
+});
+
+const ListNodesAction = z.object({
+  action: z.literal("list_nodes"),
+});
+
+const ListTemplatesAction = z.object({
+  action: z.literal("list_templates"),
+});
+
+const InfoAction = z.object({
+  action: z.literal("info"),
+  message: z.string(),
+});
+
+const CopilotActionSchema = z.discriminatedUnion("action", [
+  CreateNodeAction,
+  DeleteNodeAction,
+  StartNodeAction,
+  StopNodeAction,
+  CreateLinkAction,
+  DeleteLinkAction,
+  ListNodesAction,
+  ListTemplatesAction,
+  InfoAction,
+]);
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -173,13 +235,13 @@ ${templatesInfo}`;
     const actions: CopilotAction[] = [];
 
     try {
-      let parsed;
+      let rawParsed;
       try {
-        parsed = JSON.parse(response.trim());
+        rawParsed = JSON.parse(response.trim());
       } catch {
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
+          rawParsed = JSON.parse(jsonMatch[0]);
         } else {
           return [{
             type: "info",
@@ -188,123 +250,201 @@ ${templatesInfo}`;
         }
       }
 
+      const validationResult = CopilotActionSchema.safeParse(rawParsed);
+      if (!validationResult.success) {
+        console.warn("Invalid action format from AI:", validationResult.error.issues);
+        return [{
+          type: "info",
+          description: rawParsed.message || "I'm not sure how to process that request. Could you rephrase it?",
+        }];
+      }
+
+      const parsed = validationResult.data;
       const actionType = parsed.action;
 
       switch (actionType) {
         case "create_node": {
+          const parsedAction = parsed as z.infer<typeof CreateNodeAction>;
           const template = context.templates.find(
-            t => t.name.toLowerCase() === parsed.template?.toLowerCase() ||
-                 t.template_id === parsed.template
+            t => t.name.toLowerCase() === parsedAction.template.toLowerCase() ||
+                 t.template_id === parsedAction.template
           );
           if (!template) {
+            const availableTemplates = context.templates.map(t => t.name).slice(0, 10).join(", ");
             actions.push({
               type: "error",
-              description: `Template "${parsed.template}" not found. Available templates: ${context.templates.map(t => t.name).join(", ")}`,
+              description: `Template "${parsedAction.template}" not found. Available templates: ${availableTemplates || "none"}`,
             });
           } else {
-            const node = await client.createNodeFromTemplate(template.template_id, {
-              name: parsed.name,
-              x: parsed.x ?? Math.floor(Math.random() * 400),
-              y: parsed.y ?? Math.floor(Math.random() * 300),
-            });
-            actions.push({
-              type: "create_node",
-              description: `Created node "${node.name}" from template "${template.name}"`,
-              result: node,
-            });
+            try {
+              const node = await client.createNodeFromTemplate(template.template_id, {
+                name: parsedAction.name,
+                x: parsedAction.x ?? Math.floor(Math.random() * 400),
+                y: parsedAction.y ?? Math.floor(Math.random() * 300),
+              });
+              actions.push({
+                type: "create_node",
+                description: `Created node "${node.name}" from template "${template.name}"`,
+                result: node,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to create node: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
 
         case "delete_node": {
-          const node = this.findNode(parsed.node_id, context.nodes);
+          const parsedAction = parsed as z.infer<typeof DeleteNodeAction>;
+          const node = this.findNode(parsedAction.node_id, context.nodes);
           if (!node) {
+            const availableNodes = context.nodes.map(n => n.name).slice(0, 10).join(", ");
             actions.push({
               type: "error",
-              description: `Node "${parsed.node_id}" not found`,
+              description: `Node "${parsedAction.node_id}" not found. Available nodes: ${availableNodes || "none"}`,
             });
           } else {
-            await client.deleteNode(node.node_id);
-            actions.push({
-              type: "delete_node",
-              description: `Deleted node "${node.name}"`,
-            });
+            try {
+              await client.deleteNode(node.node_id);
+              actions.push({
+                type: "delete_node",
+                description: `Deleted node "${node.name}"`,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to delete node: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
 
         case "start_node": {
-          const node = this.findNode(parsed.node_id, context.nodes);
+          const parsedAction = parsed as z.infer<typeof StartNodeAction>;
+          const node = this.findNode(parsedAction.node_id, context.nodes);
           if (!node) {
+            const availableNodes = context.nodes.map(n => n.name).slice(0, 10).join(", ");
             actions.push({
               type: "error",
-              description: `Node "${parsed.node_id}" not found`,
+              description: `Node "${parsedAction.node_id}" not found. Available nodes: ${availableNodes || "none"}`,
+            });
+          } else if (node.status === "started") {
+            actions.push({
+              type: "info",
+              description: `Node "${node.name}" is already running`,
             });
           } else {
-            await client.startNode(node.node_id);
-            actions.push({
-              type: "start_node",
-              description: `Started node "${node.name}"`,
-            });
+            try {
+              await client.startNode(node.node_id);
+              actions.push({
+                type: "start_node",
+                description: `Started node "${node.name}"`,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to start node: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
 
         case "stop_node": {
-          const node = this.findNode(parsed.node_id, context.nodes);
+          const parsedAction = parsed as z.infer<typeof StopNodeAction>;
+          const node = this.findNode(parsedAction.node_id, context.nodes);
           if (!node) {
+            const availableNodes = context.nodes.map(n => n.name).slice(0, 10).join(", ");
             actions.push({
               type: "error",
-              description: `Node "${parsed.node_id}" not found`,
+              description: `Node "${parsedAction.node_id}" not found. Available nodes: ${availableNodes || "none"}`,
+            });
+          } else if (node.status === "stopped") {
+            actions.push({
+              type: "info",
+              description: `Node "${node.name}" is already stopped`,
             });
           } else {
-            await client.stopNode(node.node_id);
-            actions.push({
-              type: "stop_node",
-              description: `Stopped node "${node.name}"`,
-            });
+            try {
+              await client.stopNode(node.node_id);
+              actions.push({
+                type: "stop_node",
+                description: `Stopped node "${node.name}"`,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to stop node: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
 
         case "create_link": {
-          const sourceNode = this.findNode(parsed.source_node, context.nodes);
-          const targetNode = this.findNode(parsed.target_node, context.nodes);
+          const parsedAction = parsed as z.infer<typeof CreateLinkAction>;
+          const sourceNode = this.findNode(parsedAction.source_node, context.nodes);
+          const targetNode = this.findNode(parsedAction.target_node, context.nodes);
           
           if (!sourceNode || !targetNode) {
+            const availableNodes = context.nodes.map(n => n.name).slice(0, 10).join(", ");
             actions.push({
               type: "error",
-              description: `Could not find nodes: ${!sourceNode ? parsed.source_node : ""} ${!targetNode ? parsed.target_node : ""}`.trim(),
+              description: `Could not find nodes: ${!sourceNode ? parsedAction.source_node : ""} ${!targetNode ? parsedAction.target_node : ""}. Available nodes: ${availableNodes || "none"}`.trim(),
+            });
+          } else if (sourceNode.node_id === targetNode.node_id) {
+            actions.push({
+              type: "error",
+              description: "Cannot create a link from a node to itself",
             });
           } else {
-            const link = await client.createLink({
-              nodes: [
-                { node_id: sourceNode.node_id, adapter_number: 0, port_number: parsed.source_port ?? 0 },
-                { node_id: targetNode.node_id, adapter_number: 0, port_number: parsed.target_port ?? 0 },
-              ],
-            });
-            actions.push({
-              type: "create_link",
-              description: `Created link between "${sourceNode.name}:port${parsed.source_port ?? 0}" and "${targetNode.name}:port${parsed.target_port ?? 0}"`,
-              result: link,
-            });
+            try {
+              const link = await client.createLink({
+                nodes: [
+                  { node_id: sourceNode.node_id, adapter_number: 0, port_number: parsedAction.source_port },
+                  { node_id: targetNode.node_id, adapter_number: 0, port_number: parsedAction.target_port },
+                ],
+              });
+              actions.push({
+                type: "create_link",
+                description: `Created link between "${sourceNode.name}:port${parsedAction.source_port}" and "${targetNode.name}:port${parsedAction.target_port}"`,
+                result: link,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to create link: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
 
         case "delete_link": {
-          const link = context.links.find(l => l.link_id === parsed.link_id);
+          const parsedAction = parsed as z.infer<typeof DeleteLinkAction>;
+          const link = context.links.find(l => l.link_id === parsedAction.link_id);
           if (!link) {
             actions.push({
               type: "error",
-              description: `Link "${parsed.link_id}" not found`,
+              description: `Link "${parsedAction.link_id}" not found in current topology`,
             });
           } else {
-            await client.deleteLink(link.link_id);
-            actions.push({
-              type: "delete_link",
-              description: `Deleted link ${link.link_id}`,
-            });
+            try {
+              await client.deleteLink(link.link_id);
+              actions.push({
+                type: "delete_link",
+                description: `Deleted link ${link.link_id}`,
+              });
+            } catch (err) {
+              actions.push({
+                type: "error",
+                description: `Failed to delete link: ${err instanceof Error ? err.message : "Unknown error"}`,
+              });
+            }
           }
           break;
         }
@@ -333,11 +473,11 @@ ${templatesInfo}`;
           break;
         }
 
-        case "info":
-        default: {
+        case "info": {
+          const parsedAction = parsed as z.infer<typeof InfoAction>;
           actions.push({
             type: "info",
-            description: parsed.message || response,
+            description: parsedAction.message,
           });
           break;
         }
