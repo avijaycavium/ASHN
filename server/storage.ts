@@ -128,64 +128,96 @@ function generateIncidents(): Incident[] {
   return [
     {
       id: "INC-2025-001",
-      title: "Link Failure - Spine-1 to TOR-1",
-      description: "Physical link failure detected between Spine-1:port1 and TOR-1:port1. Traffic rerouting in progress.",
+      title: "Link Failure - Switch-A to Switch-B",
+      description: "Physical link failure detected between Switch-A:port1 and Switch-B:port2. Cable fault or transceiver failure suspected. Automatic traffic rerouting initiated.",
       severity: "critical",
       status: "remediating",
-      ttd: 5,
-      ttr: 50,
+      ttd: 25,
+      ttr: 55,
       tttr: null,
-      affectedDevices: ["spine-1", "tor-1", "dpu-1", "dpu-2", "dpu-3"],
-      rootCause: "Link failure between Spine-1:port1 and TOR-1:port1. Physical layer issue detected via SNMP ifOperStatus.",
-      confidence: 98,
+      affectedDevices: ["spine-1", "spine-2", "tor-1", "tor-2", "tor-3", "dpu-1", "dpu-2", "dpu-3", "dpu-4", "dpu-5", "dpu-6", "dpu-7", "dpu-8", "dpu-9", "dpu-10"],
+      rootCause: "Link failure between Switch-A:port1 and Switch-B:port2. Physical layer issue detected via link state monitoring. 15 downstream devices affected. OSPF/BGP auto-convergence in progress.",
+      confidence: 95,
       createdAt: new Date(now.getTime() - 5 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 2 * 60000).toISOString(),
       resolvedAt: null,
     },
     {
       id: "INC-2025-002",
-      title: "Port Congestion - TOR-3",
-      description: "High traffic congestion detected on TOR-3 uplink ports. QoS policies being applied.",
+      title: "Port Congestion - TOR-3 Uplink",
+      description: "Queue depth 85% (baseline <15%), latency 250ms, packet drops detected on TOR-3 uplink ports. QoS remediation in progress.",
       severity: "high",
-      status: "investigating",
-      ttd: 60,
-      ttr: null,
+      status: "remediating",
+      ttd: 90,
+      ttr: 55,
       tttr: null,
-      affectedDevices: ["tor-3", "dpu-11", "dpu-12"],
-      rootCause: null,
-      confidence: 75,
-      createdAt: new Date(now.getTime() - 30 * 60000).toISOString(),
-      updatedAt: new Date(now.getTime() - 15 * 60000).toISOString(),
+      affectedDevices: ["tor-3", "dpu-11", "dpu-12", "dpu-13", "dpu-14"],
+      rootCause: "Port congestion due to traffic surge. Queue depth 85% + latency 250ms + packet drops confirmed. Applying QoS buffer threshold adjustment and priority traffic policy.",
+      confidence: 89,
+      createdAt: new Date(now.getTime() - 10 * 60000).toISOString(),
+      updatedAt: new Date(now.getTime() - 3 * 60000).toISOString(),
       resolvedAt: null,
     },
     {
       id: "INC-2025-003",
-      title: "BGP Session Flap - Core-1",
-      description: "BGP session instability detected. Automatic stabilization measures applied.",
-      severity: "medium",
+      title: "DPU Resource Exhaustion - DPU-5",
+      description: "CPU saturation at 95% (baseline <70%), latency spike 250ms (baseline <100ms). Workload migration to DPU-8 initiated.",
+      severity: "high",
+      status: "remediating",
+      ttd: 100,
+      ttr: 110,
+      tttr: null,
+      affectedDevices: ["dpu-5", "dpu-8"],
+      rootCause: "DPU-5 workload imbalance causing CPU saturation and memory pressure. Target DPU-8 identified with available capacity. Live migration strategy selected.",
+      confidence: 85,
+      createdAt: new Date(now.getTime() - 8 * 60000).toISOString(),
+      updatedAt: new Date(now.getTime() - 4 * 60000).toISOString(),
+      resolvedAt: null,
+    },
+    {
+      id: "INC-2025-004",
+      title: "Link Failure Recovery - Spine-2 to TOR-4",
+      description: "Link failure between Spine-2:port3 and TOR-4:port1 successfully remediated. Traffic rerouted via alternate path.",
+      severity: "critical",
       status: "resolved",
-      ttd: 15,
-      ttr: 120,
-      tttr: 180,
-      affectedDevices: ["core-1", "spine-1", "spine-2"],
-      rootCause: "Transient network instability caused BGP session flap. OSPF reconvergence completed successfully.",
-      confidence: 95,
+      ttd: 28,
+      ttr: 58,
+      tttr: 115,
+      affectedDevices: ["spine-2", "tor-4", "dpu-15", "dpu-16", "dpu-17", "dpu-18"],
+      rootCause: "Link failure detected via interface down event. Alternate path identified through Spine-1. OSPF reconvergence completed in 45 seconds. Zero packet loss after convergence.",
+      confidence: 98,
       createdAt: new Date(now.getTime() - 2 * 60 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 60 * 60000).toISOString(),
       resolvedAt: new Date(now.getTime() - 60 * 60000).toISOString(),
     },
     {
-      id: "INC-2025-004",
-      title: "SNR Degradation - DPU Cluster",
-      description: "Signal-to-noise ratio below threshold on multiple DPU connections.",
-      severity: "low",
+      id: "INC-2025-005",
+      title: "QoS Remediation Complete - TOR-2",
+      description: "Port congestion on TOR-2 resolved. Queue depth normalized from 82% to 12%, latency reduced from 230ms to 45ms.",
+      severity: "high",
       status: "closed",
-      ttd: 30,
-      ttr: 90,
-      tttr: 120,
-      affectedDevices: ["dpu-15", "dpu-16", "dpu-17"],
-      rootCause: "Environmental interference affecting optical signals. Automatic power adjustment applied.",
+      ttd: 105,
+      ttr: 50,
+      tttr: 175,
+      affectedDevices: ["tor-2", "dpu-6", "dpu-7", "dpu-8"],
+      rootCause: "Traffic surge caused queue overflow. QoS buffer thresholds increased by 20%. Priority traffic policy applied. Packet loss reduced from 5% to <0.1%.",
       confidence: 92,
+      createdAt: new Date(now.getTime() - 4 * 60 * 60000).toISOString(),
+      updatedAt: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
+      resolvedAt: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
+    },
+    {
+      id: "INC-2025-006",
+      title: "DPU Workload Migration Complete - DPU-12",
+      description: "Workload migrated from DPU-12 to DPU-15. CPU normalized from 94% to 62%, latency recovered from 245ms to 78ms.",
+      severity: "high",
+      status: "closed",
+      ttd: 95,
+      ttr: 118,
+      tttr: 285,
+      affectedDevices: ["dpu-12", "dpu-15"],
+      rootCause: "DPU-12 resource exhaustion detected. Container workload successfully migrated to DPU-15. Offload rules adjusted for optimal distribution. No service disruption during migration.",
+      confidence: 88,
       createdAt: new Date(now.getTime() - 6 * 60 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 5 * 60 * 60000).toISOString(),
       resolvedAt: new Date(now.getTime() - 5 * 60 * 60000).toISOString(),
@@ -439,71 +471,70 @@ function generateTimeline(incidentId: string): TimelineEvent[] {
   const now = new Date();
   const baseTime = now.getTime() - 5 * 60000;
   
-  if (incidentId !== "INC-2025-001") {
-    return [];
+  if (incidentId === "INC-2025-001") {
+    return [
+      { id: "tl-001", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Link Down Detected", agent: "Telemetry Agent", details: "Interface state changed to down on Switch-A:port1" },
+      { id: "tl-002", incidentId, timestamp: new Date(baseTime + 5000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "link_down event detected with 100% confidence" },
+      { id: "tl-003", incidentId, timestamp: new Date(baseTime + 10000).toISOString(), event: "Alert Created", agent: "System", details: "link_failure alert generated" },
+      { id: "tl-004", incidentId, timestamp: new Date(baseTime + 15000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing link failure between Switch-A:port1 and Switch-B:port2" },
+      { id: "tl-005", incidentId, timestamp: new Date(baseTime + 25000).toISOString(), event: "Impact Computed", agent: "Topology Agent", details: "15 downstream devices affected by link failure" },
+      { id: "tl-006", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Root cause confirmed with 95% confidence" },
+      { id: "tl-007", incidentId, timestamp: new Date(baseTime + 35000).toISOString(), event: "Alternate Path Found", agent: "Remediation Agent", details: "Alternate route via Spine-2 identified using topology.resolve" },
+      { id: "tl-008", incidentId, timestamp: new Date(baseTime + 40000).toISOString(), event: "Remediation Started", agent: "Remediation Agent", details: "Enabling alternate route - OSPF/BGP auto-converging" },
+      { id: "tl-009", incidentId, timestamp: new Date(baseTime + 55000).toISOString(), event: "Routing Converged", agent: "Verification Agent", details: "OSPF/BGP convergence completed in 30-60 seconds" },
+    ];
   }
   
-  return [
-    {
-      id: "tl-001",
-      incidentId,
-      timestamp: new Date(baseTime).toISOString(),
-      event: "Fault Injected",
-      agent: "System",
-      details: "Physical link failure detected on Spine-1:port1",
-    },
-    {
-      id: "tl-002",
-      incidentId,
-      timestamp: new Date(baseTime + 5000).toISOString(),
-      event: "Link Down Detected",
-      agent: "Telemetry Agent",
-      details: "SNMP ifOperStatus changed to down",
-    },
-    {
-      id: "tl-003",
-      incidentId,
-      timestamp: new Date(baseTime + 10000).toISOString(),
-      event: "Anomaly Flagged",
-      agent: "Anomaly Agent",
-      details: "Confidence: 100% - Sudden state change detected",
-    },
-    {
-      id: "tl-004",
-      incidentId,
-      timestamp: new Date(baseTime + 15000).toISOString(),
-      event: "Alert Created",
-      agent: "Alert Agent",
-      details: "Critical alert generated: AF-001",
-    },
-    {
-      id: "tl-005",
-      incidentId,
-      timestamp: new Date(baseTime + 20000).toISOString(),
-      event: "RCA Completed",
-      agent: "RCA Agent",
-      details: "Root cause identified with 98% confidence",
-    },
-    {
-      id: "tl-006",
-      incidentId,
-      timestamp: new Date(baseTime + 30000).toISOString(),
-      event: "Remediation Approved",
-      agent: "Remediation Agent",
-      details: "Auto-approved based on policy: LOW risk",
-    },
-    {
-      id: "tl-007",
-      incidentId,
-      timestamp: new Date(baseTime + 45000).toISOString(),
-      event: "BGP Convergence Started",
-      agent: "Execution Agent",
-      details: "Initiating traffic reroute through alternate paths",
-    },
-  ];
+  if (incidentId === "INC-2025-002") {
+    return [
+      { id: "tl-101", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Congestion Detected", agent: "Telemetry Agent", details: "Queue depth at 85% (baseline <15%), latency 250ms" },
+      { id: "tl-102", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "Port congestion detected with 92% confidence" },
+      { id: "tl-103", incidentId, timestamp: new Date(baseTime + 45000).toISOString(), event: "Alert Created", agent: "System", details: "port_congestion alert generated for TOR-3" },
+      { id: "tl-104", incidentId, timestamp: new Date(baseTime + 60000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing traffic patterns on TOR-3 uplink" },
+      { id: "tl-105", incidentId, timestamp: new Date(baseTime + 90000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Hypothesis confirmed: Queue depth 85% + latency 250ms + packet drops = Port congestion (89% confidence)" },
+      { id: "tl-106", incidentId, timestamp: new Date(baseTime + 100000).toISOString(), event: "Policy Check", agent: "Compliance Agent", details: "QoS changes validated against network policies" },
+      { id: "tl-107", incidentId, timestamp: new Date(baseTime + 110000).toISOString(), event: "QoS Adjustment Started", agent: "Remediation Agent", details: "Adjusting buffer thresholds by 20%" },
+      { id: "tl-108", incidentId, timestamp: new Date(baseTime + 130000).toISOString(), event: "QoS Policy Applied", agent: "Remediation Agent", details: "Priority traffic policy reconfigured" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-003") {
+    return [
+      { id: "tl-201", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Resource Alert", agent: "Telemetry Agent", details: "DPU-5 CPU at 95% (baseline <70%), latency 250ms" },
+      { id: "tl-202", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "DPU resource exhaustion detected with 88% confidence" },
+      { id: "tl-203", incidentId, timestamp: new Date(baseTime + 50000).toISOString(), event: "Alert Created", agent: "System", details: "dpu_resource_exhaustion alert generated" },
+      { id: "tl-204", incidentId, timestamp: new Date(baseTime + 70000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing workload patterns on DPU-5" },
+      { id: "tl-205", incidentId, timestamp: new Date(baseTime + 100000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "CPU saturation caused by workload imbalance (85% confidence)" },
+      { id: "tl-206", incidentId, timestamp: new Date(baseTime + 110000).toISOString(), event: "Target DPU Identified", agent: "Remediation Agent", details: "DPU-8 identified with available capacity (CPU 45%, Memory 52%)" },
+      { id: "tl-207", incidentId, timestamp: new Date(baseTime + 120000).toISOString(), event: "Policy Check", agent: "Compliance Agent", details: "Workload migration validated against policies" },
+      { id: "tl-208", incidentId, timestamp: new Date(baseTime + 130000).toISOString(), event: "Migration Started", agent: "Remediation Agent", details: "Live migration of container workload initiated" },
+      { id: "tl-209", incidentId, timestamp: new Date(baseTime + 180000).toISOString(), event: "Offload Rules Updated", agent: "Remediation Agent", details: "Offload rules adjusted for optimal distribution" },
+    ];
+  }
+  
+  return [];
 }
 
 function generateRemediation(incidentId: string): RemediationStep[] {
+  if (incidentId === "INC-2025-002") {
+    return [
+      { id: "rem-201", incidentId, step: 1, description: "Analyze queue depth, latency, and packet drop metrics", status: "completed" },
+      { id: "rem-202", incidentId, step: 2, description: "Adjust QoS buffer thresholds (+20%)", status: "completed" },
+      { id: "rem-203", incidentId, step: 3, description: "Reconfigure QoS policy to priority_traffic", status: "running" },
+      { id: "rem-204", incidentId, step: 4, description: "Verify queue depth and latency normalized", status: "pending" },
+    ];
+  }
+  
+  if (incidentId === "INC-2025-003") {
+    return [
+      { id: "rem-301", incidentId, step: 1, description: "Analyze DPU CPU, memory, and latency metrics", status: "completed" },
+      { id: "rem-302", incidentId, step: 2, description: "Identify target DPU with available capacity", status: "completed" },
+      { id: "rem-303", incidentId, step: 3, description: "Migrate workload to DPU-8 (live migration)", status: "running" },
+      { id: "rem-304", incidentId, step: 4, description: "Adjust offload rules for optimal distribution", status: "pending" },
+      { id: "rem-305", incidentId, step: 5, description: "Verify CPU normalized and latency recovered", status: "pending" },
+    ];
+  }
+  
   if (incidentId !== "INC-2025-001") {
     return [];
   }

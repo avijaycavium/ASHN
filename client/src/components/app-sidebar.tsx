@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Settings,
   MessageCircle,
+  FlaskConical,
 } from "lucide-react";
 import {
   Sidebar,
@@ -60,6 +61,11 @@ const navigationItems = [
     title: "Network Copilot",
     url: "/copilot",
     icon: MessageCircle,
+  },
+  {
+    title: "Use Cases",
+    url: "/use-cases",
+    icon: FlaskConical,
   },
   {
     title: "Audit Trail",
