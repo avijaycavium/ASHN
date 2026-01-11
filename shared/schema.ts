@@ -373,7 +373,25 @@ export interface MetricTrend {
   latency: number;
   packetDrops: number;
   bgpPeers: number;
+  deviceId?: string;
+  tier?: DeviceTier;
 }
+
+export const metricsTimeseries = pgTable("metrics_timeseries", {
+  id: serial("id").primaryKey(),
+  deviceId: text("device_id").notNull().references(() => devices.id),
+  collectedAt: timestamp("collected_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  cpu: real("cpu").notNull().default(0),
+  memory: real("memory").notNull().default(0),
+  portUtilization: real("port_utilization").notNull().default(0),
+  latency: real("latency").notNull().default(0),
+  packetDrops: integer("packet_drops").notNull().default(0),
+  bgpPeers: integer("bgp_peers").notNull().default(0),
+});
+
+export const insertMetricsTimeseriesSchema = createInsertSchema(metricsTimeseries).omit({ id: true });
+export type InsertMetricsTimeseries = z.infer<typeof insertMetricsTimeseriesSchema>;
+export type MetricsTimeseries = typeof metricsTimeseries.$inferSelect;
 
 export interface SystemHealth {
   cpu: number;
