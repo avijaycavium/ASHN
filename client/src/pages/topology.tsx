@@ -18,13 +18,6 @@ const statusColors: Record<string, string> = {
   offline: "bg-status-offline",
 };
 
-const statusBorderColors: Record<string, string> = {
-  healthy: "border-status-online",
-  degraded: "border-status-away",
-  critical: "border-status-busy",
-  offline: "border-status-offline",
-};
-
 export default function TopologyPage() {
   const [isSSEConnected, setIsSSEConnected] = useState(false);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
