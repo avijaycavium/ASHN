@@ -260,3 +260,39 @@ The workflow includes intelligent routing:
 - Low RCA confidence or high risk → skips remediation
 - Verification failure → retries with different approach (max 2 retries)
 - Verification success → incident resolved
+
+### AI Fallback Behavior
+
+The agent system gracefully handles missing AI credentials:
+- If `REPLIT_AI_API_KEY` or `OPENAI_API_KEY` is not set, agents use rule-based logic
+- Detection and RCA nodes automatically fall back to predefined patterns
+- No errors are raised; workflows complete successfully in rule-based mode
+- AI key can be added later to enable enhanced analysis without code changes
+
+### Async Workflow Execution
+
+The Flask agent server supports both synchronous and asynchronous workflow execution:
+
+```json
+// Synchronous (blocks until complete)
+POST /api/agents/trigger
+{ "device_id": "...", "fault_type": "...", "async": false }
+
+// Asynchronous (returns immediately, poll for status)
+POST /api/agents/trigger
+{ "device_id": "...", "fault_type": "...", "async": true }
+// Returns 202 with incident_id, then poll:
+GET /api/agents/workflow/<incident_id>
+```
+
+Background execution uses `ThreadPoolExecutor` with up to 5 concurrent workers.
+
+### Timeout and Error Handling
+
+| Component | Timeout | Behavior |
+|-----------|---------|----------|
+| Node.js → Python workflow trigger | 30 seconds | Returns 504 Gateway Timeout |
+| Node.js → Python status/capability checks | 5 seconds | Returns cached/fallback data |
+| Flask background worker | None | Runs to completion, stores result |
+
+All API calls use `AbortController` for clean timeout handling and prevent Express from blocking on slow/unresponsive Python agent server.
