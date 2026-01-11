@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { 
   AlertTriangle, 
   Filter, 
-  Plus, 
   Search,
   CheckCircle2,
   Clock,
@@ -128,10 +127,6 @@ export default function IncidentsPage() {
             Monitor and manage network incidents
           </p>
         </div>
-        <Button className="gap-1.5" data-testid="button-create-incident">
-          <Plus className="h-4 w-4" />
-          Create Incident
-        </Button>
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
