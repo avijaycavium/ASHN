@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { databaseStorage } from "./database-storage";
+import { metricsCollector } from "./metrics-collector";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 import { getCopilot } from "./copilot";
 import { orchestrator } from "./orchestrator";
@@ -29,6 +30,9 @@ export async function registerRoutes(
 ): Promise<Server> {
   await databaseStorage.initialize();
   console.log("[Routes] Database initialized");
+  
+  await metricsCollector.start();
+  console.log("[Routes] Metrics collector started");
   
   app.get("/api/devices", async (req, res) => {
     try {
@@ -170,9 +174,20 @@ export async function registerRoutes(
 
   app.get("/api/metrics/trends", async (req, res) => {
     try {
-      const trends = await databaseStorage.getMetricTrends();
+      const deviceId = req.query.deviceId as string | undefined;
+      const tier = req.query.tier as "core" | "spine" | "tor" | "endpoint" | undefined;
+      const hoursBack = req.query.hoursBack ? parseInt(req.query.hoursBack as string) : 24;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 100;
+      
+      const trends = await databaseStorage.getMetricTrends({ 
+        deviceId, 
+        tier, 
+        hoursBack, 
+        limit 
+      });
       res.json(trends);
     } catch (error) {
+      console.error("Failed to fetch metric trends:", error);
       res.status(500).json({ error: "Failed to fetch metric trends" });
     }
   });

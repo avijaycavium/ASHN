@@ -521,7 +521,8 @@ export class DatabaseStorage {
         .limit(limit);
       
       if (metrics.length > 0) {
-        const grouped = new Map<string, typeof metrics>();
+        type MetricRow = { collectedAt: Date; cpu: number; memory: number; portUtilization: number; latency: number; packetDrops: number; bgpPeers: number; deviceId: string };
+        const grouped = new Map<string, MetricRow[]>();
         for (const m of metrics) {
           const key = m.collectedAt.toISOString().slice(0, 16);
           if (!grouped.has(key)) {
@@ -531,13 +532,16 @@ export class DatabaseStorage {
         }
         
         const trends: MetricTrend[] = [];
-        for (const [timestamp, group] of grouped) {
-          const avgCpu = group.reduce((sum, m) => sum + m.cpu, 0) / group.length;
-          const avgMemory = group.reduce((sum, m) => sum + m.memory, 0) / group.length;
-          const avgPortUtil = group.reduce((sum, m) => sum + m.portUtilization, 0) / group.length;
-          const avgLatency = group.reduce((sum, m) => sum + m.latency, 0) / group.length;
-          const totalPacketDrops = group.reduce((sum, m) => sum + m.packetDrops, 0);
-          const totalBgpPeers = group.reduce((sum, m) => sum + m.bgpPeers, 0);
+        const entries = Array.from(grouped.entries());
+        for (const entry of entries) {
+          const timestamp = entry[0];
+          const group = entry[1];
+          const avgCpu = group.reduce((sum: number, m: MetricRow) => sum + m.cpu, 0) / group.length;
+          const avgMemory = group.reduce((sum: number, m: MetricRow) => sum + m.memory, 0) / group.length;
+          const avgPortUtil = group.reduce((sum: number, m: MetricRow) => sum + m.portUtilization, 0) / group.length;
+          const avgLatency = group.reduce((sum: number, m: MetricRow) => sum + m.latency, 0) / group.length;
+          const totalPacketDrops = group.reduce((sum: number, m: MetricRow) => sum + m.packetDrops, 0);
+          const totalBgpPeers = group.reduce((sum: number, m: MetricRow) => sum + m.bgpPeers, 0);
           
           trends.push({
             timestamp: timestamp + ':00.000Z',
