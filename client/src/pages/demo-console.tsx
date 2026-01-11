@@ -1075,6 +1075,8 @@ export default function DemoConsolePage() {
             const isResolvedScenario = isResolved && isThisScenarioType;
             const showRecommendedRing = isRecommended && !isActiveScenario && !isResolvedScenario;
             const isInProgressNotThis = demoStatus?.active && !isResolved && !isThisScenarioType;
+            const noFaultInjected = !recommendedScenario && !demoStatus?.active && !isResolved;
+            const isCardDisabled = noFaultInjected || isInProgressNotThis;
             
             return (
             <Card 
@@ -1084,10 +1086,10 @@ export default function DemoConsolePage() {
                 isActiveScenario && "ring-2 ring-primary shadow-lg",
                 isResolvedScenario && "ring-2 ring-status-online shadow-lg",
                 showRecommendedRing && "ring-2 ring-orange-500 ring-offset-2",
-                isInProgressNotThis && "opacity-50 pointer-events-none",
-                !isInProgressNotThis && !awaitingConfirmation && "cursor-pointer"
+                isCardDisabled && "opacity-60",
+                !isCardDisabled && !awaitingConfirmation && "cursor-pointer"
               )}
-              onClick={() => !isInProgressNotThis && !awaitingConfirmation && setSelectedScenario(scenario.id)}
+              onClick={() => !isCardDisabled && !awaitingConfirmation && setSelectedScenario(scenario.id)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
@@ -1164,7 +1166,7 @@ export default function DemoConsolePage() {
                 ) : (
                 <Button 
                   className="w-full gap-1.5"
-                  disabled={isRunning || injectFaultMutation.isPending || (awaitingConfirmation && isRecommended)}
+                  disabled={isCardDisabled || isRunning || injectFaultMutation.isPending || (awaitingConfirmation && isRecommended)}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleStartScenario(scenario.id);
@@ -1176,7 +1178,7 @@ export default function DemoConsolePage() {
                   ) : (
                     <Play className="h-4 w-4" />
                   )}
-                  Start Scenario
+                  {noFaultInjected ? "Inject Fault First" : "Start Scenario"}
                 </Button>
                 )}
               </CardContent>
