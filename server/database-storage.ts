@@ -1,4 +1,4 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, gte, desc, inArray, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   devices,
@@ -7,6 +7,7 @@ import {
   timelineEvents,
   remediationSteps,
   agents,
+  metricsTimeseries,
   type Device,
   type Incident,
   type Agent,
@@ -19,11 +20,13 @@ import {
   type InsertTimelineEvent,
   type InsertRemediationStep,
   type InsertAgent,
+  type InsertMetricsTimeseries,
   type SystemHealth,
   type KPIMetrics,
   type AuditEntry,
   type MetricTrend,
   type LearningUpdate,
+  type DeviceTier,
 } from "@shared/schema";
 import { generate52DeviceTopology } from "./topology-generator";
 
@@ -475,38 +478,114 @@ export class DatabaseStorage {
     return entries;
   }
 
-  async getMetricTrends(): Promise<MetricTrend[]> {
+  async getMetricTrends(options?: { 
+    deviceId?: string; 
+    tier?: DeviceTier; 
+    hoursBack?: number;
+    limit?: number;
+  }): Promise<MetricTrend[]> {
+    const hoursBack = options?.hoursBack || 24;
+    const limit = options?.limit || 100;
+    const cutoff = new Date(Date.now() - hoursBack * 60 * 60 * 1000);
+    
+    try {
+      let deviceIds: string[] = [];
+      
+      if (options?.deviceId) {
+        deviceIds = [options.deviceId];
+      } else if (options?.tier) {
+        const tieredDevices = await db.select({ id: devices.id })
+          .from(devices)
+          .where(eq(devices.tier, options.tier));
+        deviceIds = tieredDevices.map(d => d.id);
+      }
+      
+      const conditions = [gte(metricsTimeseries.collectedAt, cutoff)];
+      if (deviceIds.length > 0) {
+        conditions.push(inArray(metricsTimeseries.deviceId, deviceIds));
+      }
+      
+      const metrics = await db.select({
+        collectedAt: metricsTimeseries.collectedAt,
+        cpu: metricsTimeseries.cpu,
+        memory: metricsTimeseries.memory,
+        portUtilization: metricsTimeseries.portUtilization,
+        latency: metricsTimeseries.latency,
+        packetDrops: metricsTimeseries.packetDrops,
+        bgpPeers: metricsTimeseries.bgpPeers,
+        deviceId: metricsTimeseries.deviceId,
+      })
+        .from(metricsTimeseries)
+        .where(and(...conditions))
+        .orderBy(desc(metricsTimeseries.collectedAt))
+        .limit(limit);
+      
+      if (metrics.length > 0) {
+        const grouped = new Map<string, typeof metrics>();
+        for (const m of metrics) {
+          const key = m.collectedAt.toISOString().slice(0, 16);
+          if (!grouped.has(key)) {
+            grouped.set(key, []);
+          }
+          grouped.get(key)!.push(m);
+        }
+        
+        const trends: MetricTrend[] = [];
+        for (const [timestamp, group] of grouped) {
+          const avgCpu = group.reduce((sum, m) => sum + m.cpu, 0) / group.length;
+          const avgMemory = group.reduce((sum, m) => sum + m.memory, 0) / group.length;
+          const avgPortUtil = group.reduce((sum, m) => sum + m.portUtilization, 0) / group.length;
+          const avgLatency = group.reduce((sum, m) => sum + m.latency, 0) / group.length;
+          const totalPacketDrops = group.reduce((sum, m) => sum + m.packetDrops, 0);
+          const totalBgpPeers = group.reduce((sum, m) => sum + m.bgpPeers, 0);
+          
+          trends.push({
+            timestamp: timestamp + ':00.000Z',
+            cpu: avgCpu,
+            memory: avgMemory,
+            portUtilization: avgPortUtil,
+            latency: avgLatency,
+            packetDrops: totalPacketDrops,
+            bgpPeers: totalBgpPeers,
+            deviceId: options?.deviceId,
+            tier: options?.tier,
+          });
+        }
+        
+        return trends.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      }
+      
+      return this.generateFallbackTrends(hoursBack);
+    } catch (error) {
+      console.error("[DatabaseStorage] Error fetching metric trends:", error);
+      return this.generateFallbackTrends(hoursBack);
+    }
+  }
+
+  private generateFallbackTrends(hoursBack: number): MetricTrend[] {
     const now = Date.now();
     const trends: MetricTrend[] = [];
-    const allDevices = await this.getDevices();
-    const switchDevices = allDevices.filter(d => d.type === 'tor' || d.type === 'spine' || d.type === 'core');
-    const endpointDevices = allDevices.filter(d => d.type === 'endpoint');
     
-    const avgSwitchCpu = switchDevices.length > 0 
-      ? switchDevices.reduce((sum, d) => sum + d.cpu, 0) / switchDevices.length 
-      : 35;
-    const avgSwitchMemory = switchDevices.length > 0 
-      ? switchDevices.reduce((sum, d) => sum + d.memory, 0) / switchDevices.length 
-      : 40;
-    const avgEndpointCpu = endpointDevices.length > 0 
-      ? endpointDevices.reduce((sum, d) => sum + d.cpu, 0) / endpointDevices.length 
-      : 20;
-    
-    for (let i = 23; i >= 0; i--) {
+    for (let i = hoursBack - 1; i >= 0; i--) {
       const timestamp = new Date(now - i * 60 * 60 * 1000).toISOString();
       const variation = Math.sin(i * 0.5) * 10;
       trends.push({
         timestamp,
-        cpu: Math.max(10, Math.min(90, avgSwitchCpu + variation + (Math.random() - 0.5) * 10)),
-        memory: Math.max(20, Math.min(85, avgSwitchMemory + variation * 0.5 + (Math.random() - 0.5) * 8)),
+        cpu: Math.max(10, Math.min(90, 35 + variation + (Math.random() - 0.5) * 10)),
+        memory: Math.max(20, Math.min(85, 40 + variation * 0.5 + (Math.random() - 0.5) * 8)),
         portUtilization: 40 + variation + Math.random() * 15,
         latency: 5 + Math.random() * 10 + Math.abs(variation) * 0.3,
         packetDrops: Math.max(0, Math.floor(Math.random() * 50 + variation * 2)),
-        bgpPeers: switchDevices.length * 3 + Math.floor(Math.random() * 5 - 2),
+        bgpPeers: 90 + Math.floor(Math.random() * 5 - 2),
       });
     }
     
     return trends;
+  }
+
+  async insertMetrics(metrics: InsertMetricsTimeseries[]): Promise<void> {
+    if (metrics.length === 0) return;
+    await db.insert(metricsTimeseries).values(metrics);
   }
 
   async getLearningUpdates(): Promise<LearningUpdate[]> {
