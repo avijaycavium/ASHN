@@ -1154,6 +1154,14 @@ class AgentOrchestrator {
         metricsComparison: Record<string, { before: string; after: string; improvement: string }>;
       };
     };
+    internalLogs?: Array<{
+      timestamp: string;
+      stage: string;
+      agent: string;
+      log_type: string;
+      title: string;
+      content: Record<string, unknown>;
+    }>;
   } = {
     active: false,
     type: null,
@@ -1164,6 +1172,7 @@ class AgentOrchestrator {
     deviceId: null,
     targetDeviceId: null,
     stageDetails: {},
+    internalLogs: [],
   };
 
   async injectFault(
@@ -1184,6 +1193,7 @@ class AgentOrchestrator {
       deviceId: deviceId || null,
       targetDeviceId: targetDeviceId || null,
       stageDetails: {},
+      internalLogs: [],
     };
 
     this.addDemoEvent("detection", "Fault Injected", "System", {
@@ -1768,8 +1778,20 @@ class AgentOrchestrator {
       deviceId: null,
       targetDeviceId: null,
       stageDetails: {},
+      internalLogs: [],
     };
     this.logEvent("system", null, "status_change", "Demo scenario reset");
+  }
+
+  setDemoInternalLogs(logs: Array<{
+    timestamp: string;
+    stage: string;
+    agent: string;
+    log_type: string;
+    title: string;
+    content: Record<string, unknown>;
+  }>): void {
+    this.demoScenario.internalLogs = logs;
   }
 }
 

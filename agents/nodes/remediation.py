@@ -105,6 +105,7 @@ def remediation_node(state: IncidentState) -> Dict[str, Any]:
         Updated state with remediation results
     """
     start_time = time.time()
+    internal_logs = []
     
     fault_type = state.get("fault_type", "unknown")
     device_name = state.get("device_name", "")
@@ -119,13 +120,55 @@ def remediation_node(state: IncidentState) -> Dict[str, Any]:
     
     playbook = REMEDIATION_PLAYBOOKS.get(fault_type, [])
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "remediation",
+        "agent": "RemediationAgent",
+        "log_type": "reasoning",
+        "title": "Loading Remediation Playbook",
+        "content": {
+            "fault_type": fault_type,
+            "playbook_actions": [a.get("action_type") for a in playbook],
+            "risk_level": remediation_risk,
+            "total_steps": len(playbook)
+        }
+    })
+    
     actions_executed = []
     all_succeeded = True
     
-    for action_def in playbook:
+    for i, action_def in enumerate(playbook):
         if remediation_risk == "low" and action_def.get("risk") in ["high"]:
-            logger.info(f"Skipping high-risk action: {action_def['action_type']}")
+            internal_logs.append({
+                "timestamp": datetime.utcnow().isoformat(),
+                "stage": "remediation",
+                "agent": "RemediationAgent",
+                "log_type": "decision",
+                "title": f"Skipping High-Risk Action",
+                "content": {
+                    "action_type": action_def["action_type"],
+                    "reason": "Action risk exceeds current risk tolerance",
+                    "action_risk": action_def.get("risk"),
+                    "allowed_risk": remediation_risk
+                }
+            })
             continue
+        
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "remediation",
+            "agent": "RemediationAgent",
+            "log_type": "tool_call",
+            "title": f"Executing Action: {action_def.get('action_type')}",
+            "content": {
+                "step": i + 1,
+                "action_type": action_def.get("action_type"),
+                "command": action_def.get("command"),
+                "description": action_def.get("description"),
+                "target_device": device_name,
+                "risk_level": action_def.get("risk")
+            }
+        })
         
         action_result = _execute_action(
             action_def,
@@ -133,6 +176,20 @@ def remediation_node(state: IncidentState) -> Dict[str, Any]:
             sonic,
             gns3
         )
+        
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "remediation",
+            "agent": "RemediationAgent",
+            "log_type": "network_data",
+            "title": f"Action Result: {action_def.get('action_type')}",
+            "content": {
+                "action_type": action_result.get("action_type"),
+                "success": action_result.get("success"),
+                "output": action_result.get("output", ""),
+                "error": action_result.get("error", None)
+            }
+        })
         
         actions_executed.append(action_result)
         
@@ -145,6 +202,21 @@ def remediation_node(state: IncidentState) -> Dict[str, Any]:
         time.sleep(0.5)
     
     ttr = time.time() - start_time
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "remediation",
+        "agent": "RemediationAgent",
+        "log_type": "decision",
+        "title": "Remediation Summary",
+        "content": {
+            "total_actions": len(actions_executed),
+            "successful_actions": sum(1 for a in actions_executed if a.get("success")),
+            "failed_actions": sum(1 for a in actions_executed if not a.get("success")),
+            "overall_success": all_succeeded,
+            "execution_time_seconds": ttr
+        }
+    })
     
     event = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -162,7 +234,8 @@ def remediation_node(state: IncidentState) -> Dict[str, Any]:
         "stage": "verification",
         "remediation_actions": actions_executed,
         "ttr_seconds": ttr,
-        "events": [event]
+        "events": [event],
+        "internal_logs": internal_logs
     }
 
 

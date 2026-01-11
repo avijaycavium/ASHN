@@ -34,6 +34,16 @@ class VerificationCheck(BaseModel):
     actual: str
 
 
+class InternalLogEntry(BaseModel):
+    """Represents a detailed internal log entry for agent transparency"""
+    timestamp: str
+    stage: str
+    agent: str
+    log_type: str  # "network_data", "llm_context", "decision", "tool_call", "reasoning"
+    title: str
+    content: dict  # Flexible content structure
+
+
 class IncidentState(TypedDict):
     """
     Central state for the LangGraph workflow.
@@ -69,6 +79,7 @@ class IncidentState(TypedDict):
     tttr_seconds: float
     
     events: Annotated[list[dict], operator.add]
+    internal_logs: Annotated[list[dict], operator.add]  # Detailed internal agent logs
     error: Optional[str]
 
 
@@ -106,5 +117,6 @@ def create_initial_state(
         ttr_seconds=0.0,
         tttr_seconds=0.0,
         events=[],
+        internal_logs=[],
         error=None
     )

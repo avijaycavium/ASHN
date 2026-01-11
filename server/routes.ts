@@ -957,6 +957,12 @@ export async function registerRoutes(
       // Log the agent execution
       console.log(`[LangGraph] Healing workflow triggered: ${result.incident_id} for ${faultType} on ${payload.device_name}`);
       console.log(`[LangGraph] Stage: ${result.stage}, Verification: ${result.verification_passed}`);
+      
+      // Store internal logs in the demo scenario if available
+      if (result.internal_logs && Array.isArray(result.internal_logs)) {
+        console.log(`[LangGraph] Internal logs captured: ${result.internal_logs.length} entries`);
+        orchestrator.setDemoInternalLogs(result.internal_logs);
+      }
 
       res.json(result);
     } catch (error) {
@@ -1103,6 +1109,12 @@ export async function registerRoutes(
           
           if (response.ok) {
             healingResult = await response.json();
+            
+            // Store internal logs in the demo scenario if available
+            if (healingResult.internal_logs && Array.isArray(healingResult.internal_logs)) {
+              console.log(`[LangGraph] Internal logs captured: ${healingResult.internal_logs.length} entries`);
+              orchestrator.setDemoInternalLogs(healingResult.internal_logs);
+            }
             
             // If healing was successful, clear the fault
             if (healingResult.verification_passed) {

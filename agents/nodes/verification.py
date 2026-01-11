@@ -109,12 +109,27 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
         Updated state with verification results
     """
     start_time = time.time()
+    internal_logs = []
     
     fault_type = state.get("fault_type", "unknown")
     device_name = state.get("device_name", "")
     device_id = state.get("device_id", "")
     
     logger.info(f"Verification node checking remediation for {fault_type} on {device_name}")
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "verification",
+        "agent": "VerificationAgent",
+        "log_type": "reasoning",
+        "title": "Starting Verification",
+        "content": {
+            "fault_type": fault_type,
+            "device": device_name,
+            "stabilization_wait": "1 second",
+            "purpose": "Wait for system to stabilize before running verification checks"
+        }
+    })
     
     time.sleep(1)
     
@@ -124,11 +139,38 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
     
     criteria = VERIFICATION_CRITERIA.get(fault_type, [])
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "verification",
+        "agent": "VerificationAgent",
+        "log_type": "reasoning",
+        "title": "Verification Criteria Loaded",
+        "content": {
+            "fault_type": fault_type,
+            "total_checks": len(criteria),
+            "checks": [{"name": c.get("check_name"), "metric": c.get("metric"), "expected": c.get("expected"), "critical": c.get("critical")} for c in criteria]
+        }
+    })
+    
     verification_results = []
     critical_passed = True
     total_passed = 0
     
     for criterion in criteria:
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "verification",
+            "agent": "VerificationAgent",
+            "log_type": "tool_call",
+            "title": f"Running Check: {criterion.get('check_name')}",
+            "content": {
+                "tool": "PrometheusTools.query",
+                "metric": criterion.get("metric"),
+                "expected_value": criterion.get("expected"),
+                "is_critical": criterion.get("critical", False)
+            }
+        })
+        
         result = _run_verification_check(
             criterion,
             device_id,
@@ -137,6 +179,20 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
             gns3
         )
         
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "verification",
+            "agent": "VerificationAgent",
+            "log_type": "network_data",
+            "title": f"Check Result: {criterion.get('check_name')}",
+            "content": {
+                "check_name": result.get("check_name"),
+                "expected": result.get("expected"),
+                "actual": result.get("actual"),
+                "passed": result.get("passed")
+            }
+        })
+        
         verification_results.append(result)
         
         if result.get("passed"):
@@ -144,10 +200,36 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
         elif criterion.get("critical", False):
             critical_passed = False
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "verification",
+        "agent": "VerificationAgent",
+        "log_type": "tool_call",
+        "title": "Verifying GNS3 Node Status",
+        "content": {
+            "tool": "GNS3Tools.get_node_by_name",
+            "device": device_name,
+            "expected_status": "started"
+        }
+    })
+    
     gns3_verification = _verify_gns3_state(device_name, gns3)
     verification_results.append(gns3_verification)
     if gns3_verification.get("passed"):
         total_passed += 1
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "verification",
+        "agent": "VerificationAgent",
+        "log_type": "network_data",
+        "title": "GNS3 Verification Result",
+        "content": {
+            "expected": gns3_verification.get("expected"),
+            "actual": gns3_verification.get("actual"),
+            "passed": gns3_verification.get("passed")
+        }
+    })
     
     all_passed = critical_passed and (total_passed >= len(criteria) * 0.8)
     
@@ -160,6 +242,23 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
     else:
         final_stage = "failed"
         action = "verification_failed"
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "verification",
+        "agent": "VerificationAgent",
+        "log_type": "decision",
+        "title": "Verification Complete",
+        "content": {
+            "total_checks": len(verification_results),
+            "checks_passed": total_passed,
+            "critical_checks_passed": critical_passed,
+            "pass_threshold": "80%",
+            "overall_result": "PASSED" if all_passed else "FAILED",
+            "final_stage": final_stage,
+            "total_incident_time_seconds": total_time
+        }
+    })
     
     event = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -180,7 +279,8 @@ def verification_node(state: IncidentState) -> Dict[str, Any]:
         "verification_checks": verification_results,
         "verification_passed": all_passed,
         "tttr_seconds": tttr,
-        "events": [event]
+        "events": [event],
+        "internal_logs": internal_logs
     }
 
 

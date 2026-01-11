@@ -141,6 +141,7 @@ def rca_node(state: IncidentState) -> Dict[str, Any]:
         Updated state with RCA findings
     """
     start_time = time.time()
+    internal_logs = []
     
     fault_type = state.get("fault_type", "unknown")
     device_name = state.get("device_name", "")
@@ -151,21 +152,120 @@ def rca_node(state: IncidentState) -> Dict[str, Any]:
     sonic = SONiCTools(simulate=True)
     prometheus = PrometheusTools(simulate=True)
     
+    knowledge = RCA_KNOWLEDGE_BASE.get(fault_type, {})
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "reasoning",
+        "title": "Loading RCA Knowledge Base",
+        "content": {
+            "fault_type": fault_type,
+            "knowledge_base_entry": knowledge,
+            "common_causes": knowledge.get("common_causes", []),
+            "diagnostic_commands": knowledge.get("diagnostic_commands", []),
+            "remediation_options": knowledge.get("remediation_options", [])
+        }
+    })
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "tool_call",
+        "title": "Gathering SONiC Diagnostics",
+        "content": {
+            "tool": "SONiCTools",
+            "commands_executed": knowledge.get("diagnostic_commands", ["show bgp neighbors", "show interface status"]),
+            "description": "Collecting diagnostic data from SONiC switch via vtysh"
+        }
+    })
+    
     diagnostic_data = _gather_diagnostics(sonic, fault_type)
     
-    knowledge = RCA_KNOWLEDGE_BASE.get(fault_type, {})
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "network_data",
+        "title": "SONiC Diagnostic Results",
+        "content": {
+            "source": "SONiC vtysh",
+            "bgp_neighbors": diagnostic_data.get("bgp_neighbors", {}),
+            "interface_status": diagnostic_data.get("interface_status", {}),
+            "data_collected_at": datetime.utcnow().isoformat()
+        }
+    })
+    
     common_causes = knowledge.get("common_causes", ["Unknown cause"])
     remediation_options = knowledge.get("remediation_options", [])
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "reasoning",
+        "title": "Analyzing Root Cause",
+        "content": {
+            "input_evidence": {
+                "metric_deviations": metric_deviations,
+                "diagnostic_data_keys": list(diagnostic_data.keys())
+            },
+            "candidate_causes": common_causes,
+            "analysis_method": "Evidence correlation with known fault patterns"
+        }
+    })
     
     root_cause, hypothesis, evidence, confidence = _analyze_root_cause(
         fault_type, metric_deviations, diagnostic_data, common_causes
     )
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "decision",
+        "title": "Root Cause Identified",
+        "content": {
+            "identified_root_cause": root_cause,
+            "hypothesis": hypothesis,
+            "supporting_evidence": evidence,
+            "confidence_score": confidence,
+            "decision_rationale": f"Selected '{root_cause}' as most likely cause based on {len(evidence)} pieces of evidence"
+        }
+    })
+    
     remediation_plan = _generate_remediation_plan(fault_type, root_cause, remediation_options)
     
-    affected_devices = _identify_affected_devices(device_name, fault_type)
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "decision",
+        "title": "Remediation Plan Generated",
+        "content": {
+            "remediation_steps": remediation_plan,
+            "based_on_fault_type": fault_type,
+            "based_on_root_cause": root_cause
+        }
+    })
     
+    affected_devices = _identify_affected_devices(device_name, fault_type)
     risk = _assess_remediation_risk(fault_type, remediation_plan)
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "decision",
+        "title": "Risk Assessment Complete",
+        "content": {
+            "affected_devices": affected_devices,
+            "remediation_risk_level": risk,
+            "risk_factors_evaluated": ["action complexity", "potential downtime", "blast radius"]
+        }
+    })
     
     event = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -190,7 +290,8 @@ def rca_node(state: IncidentState) -> Dict[str, Any]:
         "affected_devices": affected_devices,
         "remediation_plan": remediation_plan,
         "remediation_risk": risk,
-        "events": [event]
+        "events": [event],
+        "internal_logs": internal_logs
     }
 
 
@@ -314,9 +415,9 @@ def rca_node_with_ai(state: IncidentState, llm: ChatOpenAI) -> Dict[str, Any]:
     Enhanced RCA node that uses AI for analysis
     """
     base_result = rca_node(state)
+    internal_logs = base_result.get("internal_logs", [])
     
-    try:
-        system_prompt = """You are a senior network engineer specializing in SONiC-based data center fabrics.
+    system_prompt = """You are a senior network engineer specializing in SONiC-based data center fabrics.
 Perform root cause analysis on the provided incident data.
 
 Your analysis should:
@@ -327,7 +428,7 @@ Your analysis should:
 
 Be precise and technical. Focus on actionable insights."""
 
-        human_message = f"""
+    human_message = f"""
 Incident Analysis Request:
 - Device: {state.get('device_name')} ({state.get('device_type')})
 - Fault Type: {state.get('fault_type')}
@@ -341,11 +442,38 @@ Please provide:
 3. Recommended remediation steps
 4. Risk assessment
 """
-        
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "rca",
+        "agent": "RCAAgent",
+        "log_type": "llm_context",
+        "title": "LLM RCA Analysis Request",
+        "content": {
+            "model": "gpt-4o",
+            "system_prompt": system_prompt,
+            "user_prompt": human_message,
+            "purpose": "AI-powered root cause analysis for deeper insight"
+        }
+    })
+    
+    try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_message)
         ])
+        
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "rca",
+            "agent": "RCAAgent",
+            "log_type": "llm_context",
+            "title": "LLM RCA Analysis Response",
+            "content": {
+                "response": response.content,
+                "status": "success"
+            }
+        })
         
         base_result["rca_hypothesis"] = response.content[:1000]
         base_result["events"].append({
@@ -358,5 +486,17 @@ Please provide:
         
     except Exception as e:
         logger.warning(f"AI RCA failed, using rule-based: {e}")
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "rca",
+            "agent": "RCAAgent",
+            "log_type": "llm_context",
+            "title": "LLM RCA Analysis Failed",
+            "content": {
+                "error": str(e),
+                "fallback": "Using rule-based RCA"
+            }
+        })
     
+    base_result["internal_logs"] = internal_logs
     return base_result

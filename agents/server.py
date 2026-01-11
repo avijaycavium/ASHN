@@ -173,6 +173,12 @@ def trigger_healing():
             },
             "events": result.get("events", []),
             "actions": result.get("remediation_actions", []),
+            "internal_logs": result.get("internal_logs", []),
+            "verification_checks": result.get("verification_checks", []),
+            "rca_hypothesis": result.get("rca_hypothesis"),
+            "rca_evidence": result.get("rca_evidence", []),
+            "detection_confidence": result.get("detection_confidence"),
+            "rca_confidence": result.get("rca_confidence"),
             "error": result.get("error")
         })
         
@@ -207,9 +213,33 @@ def get_workflow_result(incident_id: str):
             })
         
         if incident_id in completed_workflows:
+            workflow_data = completed_workflows[incident_id]
+            result = workflow_data.get("result", {})
             return jsonify({
                 "status": "completed",
-                "workflow": dict(completed_workflows[incident_id])
+                "completed_at": workflow_data.get("completed_at"),
+                "incident_id": incident_id,
+                "stage": result.get("stage"),
+                "fault_type": result.get("fault_type"),
+                "root_cause": result.get("root_cause"),
+                "verification_passed": result.get("verification_passed"),
+                "timing": {
+                    "detection": result.get("ttd_seconds", 0),
+                    "remediation": result.get("ttr_seconds", 0),
+                    "verification": result.get("tttr_seconds", 0),
+                    "total": (result.get("ttd_seconds", 0) + 
+                             result.get("ttr_seconds", 0) + 
+                             result.get("tttr_seconds", 0))
+                },
+                "events": result.get("events", []),
+                "actions": result.get("remediation_actions", []),
+                "internal_logs": result.get("internal_logs", []),
+                "verification_checks": result.get("verification_checks", []),
+                "rca_hypothesis": result.get("rca_hypothesis"),
+                "rca_evidence": result.get("rca_evidence", []),
+                "detection_confidence": result.get("detection_confidence"),
+                "rca_confidence": result.get("rca_confidence"),
+                "error": result.get("error")
             })
     
     return jsonify({"error": "Workflow not found"}), 404
@@ -239,8 +269,10 @@ def test_workflow():
                 "stage": test_result.get("stage"),
                 "fault_type": test_result.get("fault_type"),
                 "verification_passed": test_result.get("verification_passed"),
-                "events_count": len(test_result.get("events", []))
-            }
+                "events_count": len(test_result.get("events", [])),
+                "internal_logs_count": len(test_result.get("internal_logs", []))
+            },
+            "internal_logs": test_result.get("internal_logs", [])
         })
         
     except Exception as e:

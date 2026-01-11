@@ -63,6 +63,7 @@ def detection_node(state: IncidentState) -> Dict[str, Any]:
         Updated state fields
     """
     start_time = time.time()
+    internal_logs = []
     
     prometheus = PrometheusTools(simulate=True)
     gns3 = GNS3Tools(simulate=True)
@@ -73,11 +74,72 @@ def detection_node(state: IncidentState) -> Dict[str, Any]:
     
     logger.info(f"Detection node analyzing device {device_name} for fault type: {claimed_fault}")
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "tool_call",
+        "title": "Querying Prometheus for anomalies",
+        "content": {
+            "tool": "PrometheusTools.detect_anomalies",
+            "parameters": {"device_id": device_id},
+            "description": "Fetching metric anomalies from Prometheus monitoring system"
+        }
+    })
+    
     anomalies = prometheus.detect_anomalies(device_id)
     health_metrics = prometheus.get_device_health_metrics(device_id)
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "network_data",
+        "title": "Network Metrics Retrieved",
+        "content": {
+            "source": "Prometheus",
+            "anomalies_detected": len(anomalies),
+            "anomalies": anomalies,
+            "health_metrics": health_metrics,
+            "metrics_monitored": [
+                {"name": "cpu_utilization", "threshold": 80, "unit": "%"},
+                {"name": "memory_utilization", "threshold": 85, "unit": "%"},
+                {"name": "bgp_session_state", "threshold": 1, "unit": "state"},
+                {"name": "link_flap_count", "threshold": 5, "unit": "count/min"},
+                {"name": "packet_loss_rate", "threshold": 1, "unit": "%"}
+            ]
+        }
+    })
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "tool_call",
+        "title": "Querying GNS3 for node status",
+        "content": {
+            "tool": "GNS3Tools.get_node_by_name",
+            "parameters": {"device_name": device_name},
+            "description": "Checking device operational status in GNS3 topology"
+        }
+    })
+    
     node_info = gns3.get_node_by_name(device_name)
     gns3_status = node_info.get("status", "unknown") if node_info else "unknown"
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "network_data",
+        "title": "GNS3 Node Status",
+        "content": {
+            "source": "GNS3",
+            "device_name": device_name,
+            "node_info": node_info,
+            "status": gns3_status
+        }
+    })
     
     metric_deviations = []
     for anomaly in anomalies:
@@ -90,9 +152,42 @@ def detection_node(state: IncidentState) -> Dict[str, Any]:
             "severity": anomaly.get("severity", "medium")
         })
     
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "reasoning",
+        "title": "Fault Classification Analysis",
+        "content": {
+            "claimed_fault": claimed_fault,
+            "fault_signatures_evaluated": list(FAULT_SIGNATURES.keys()),
+            "evidence_inputs": {
+                "metric_anomalies": len(anomalies),
+                "gns3_device_status": gns3_status,
+                "claimed_fault_bonus": 0.4 if claimed_fault in FAULT_SIGNATURES else 0
+            },
+            "classification_method": "Evidence scoring against known fault signatures"
+        }
+    })
+    
     confirmed_fault, confidence, method = _classify_fault(
         claimed_fault, anomalies, health_metrics, gns3_status
     )
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "decision",
+        "title": "Fault Classification Result",
+        "content": {
+            "input_fault_type": claimed_fault,
+            "confirmed_fault_type": confirmed_fault,
+            "confidence_score": confidence,
+            "detection_method": method,
+            "decision_rationale": f"Confirmed fault as '{confirmed_fault}' with {confidence:.0%} confidence based on {method}"
+        }
+    })
     
     ttd = time.time() - start_time
     
@@ -118,7 +213,8 @@ def detection_node(state: IncidentState) -> Dict[str, Any]:
         "detection_method": method,
         "metric_deviations": metric_deviations,
         "ttd_seconds": ttd,
-        "events": [event]
+        "events": [event],
+        "internal_logs": internal_logs
     }
 
 
@@ -172,9 +268,9 @@ def detection_node_with_ai(state: IncidentState, llm: ChatOpenAI) -> Dict[str, A
     Enhanced detection node that uses AI for classification
     """
     base_result = detection_node(state)
+    internal_logs = base_result.get("internal_logs", [])
     
-    try:
-        system_prompt = """You are a network fault detection specialist for enterprise SONiC networks.
+    system_prompt = """You are a network fault detection specialist for enterprise SONiC networks.
 Analyze the provided metrics and anomalies to confirm the fault type and provide confidence score.
 
 Fault types you can identify:
@@ -189,17 +285,45 @@ Respond with:
 2. Confidence (0.0 to 1.0)
 3. Brief reasoning"""
 
-        human_message = f"""
+    human_message = f"""
 Device: {state.get('device_name')}
 Claimed Fault: {state.get('fault_type')}
 Detected Anomalies: {base_result.get('metric_deviations')}
 Detection Confidence: {base_result.get('detection_confidence')}
 """
-        
+    
+    internal_logs.append({
+        "timestamp": datetime.utcnow().isoformat(),
+        "stage": "detection",
+        "agent": "DetectionAgent",
+        "log_type": "llm_context",
+        "title": "LLM Classification Request",
+        "content": {
+            "model": "gpt-4o",
+            "system_prompt": system_prompt,
+            "user_prompt": human_message,
+            "purpose": "AI-enhanced fault classification to improve detection accuracy"
+        }
+    })
+    
+    try:
         response = llm.invoke([
             SystemMessage(content=system_prompt),
             HumanMessage(content=human_message)
         ])
+        
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "detection",
+            "agent": "DetectionAgent",
+            "log_type": "llm_context",
+            "title": "LLM Classification Response",
+            "content": {
+                "response": response.content,
+                "tokens_used": "N/A",
+                "status": "success"
+            }
+        })
         
         base_result["events"].append({
             "timestamp": datetime.utcnow().isoformat(),
@@ -211,5 +335,17 @@ Detection Confidence: {base_result.get('detection_confidence')}
         
     except Exception as e:
         logger.warning(f"AI classification failed, using rule-based: {e}")
+        internal_logs.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "stage": "detection",
+            "agent": "DetectionAgent",
+            "log_type": "llm_context",
+            "title": "LLM Classification Failed",
+            "content": {
+                "error": str(e),
+                "fallback": "Using rule-based classification"
+            }
+        })
     
+    base_result["internal_logs"] = internal_logs
     return base_result

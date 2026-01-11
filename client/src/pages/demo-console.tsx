@@ -26,7 +26,8 @@ import {
   XCircle,
   Server,
   Flame,
-  X
+  X,
+  FileText
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,10 +39,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Device } from "@shared/schema";
+import { AgentInternalLogs } from "@/components/dashboard/agent-internal-logs";
 
 const faultTypes = [
   { id: "cpu_spike", label: "CPU Spike", description: "Simulate high CPU utilization" },
@@ -118,6 +121,15 @@ interface StageDetails {
   };
 }
 
+interface InternalLogEntry {
+  timestamp: string;
+  stage: string;
+  agent: string;
+  log_type: string;
+  title: string;
+  content: Record<string, unknown>;
+}
+
 interface DemoScenarioStatus {
   active: boolean;
   type: string | null;
@@ -128,6 +140,7 @@ interface DemoScenarioStatus {
   deviceId: string | null;
   targetDeviceId: string | null;
   stageDetails: StageDetails;
+  internalLogs?: InternalLogEntry[];
 }
 
 const scenarios = [
@@ -1041,45 +1054,73 @@ export default function DemoConsolePage() {
               </Card>
             )}
             
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Live Event Timeline</CardTitle>
-                  <CardDescription>
-                    Real-time events from the agentic framework with detailed metrics
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <EventTimeline events={demoStatus?.events || []} />
-                </CardContent>
-              </Card>
+            <Tabs defaultValue="timeline" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-4">
+                <TabsTrigger value="timeline" className="flex items-center gap-1.5" data-testid="tab-timeline">
+                  <Activity className="h-4 w-4" />
+                  Event Timeline
+                </TabsTrigger>
+                <TabsTrigger value="stages" className="flex items-center gap-1.5" data-testid="tab-stages">
+                  <Target className="h-4 w-4" />
+                  Stage Analysis
+                </TabsTrigger>
+                <TabsTrigger value="internal-logs" className="flex items-center gap-1.5" data-testid="tab-internal-logs">
+                  <FileText className="h-4 w-4" />
+                  Internal Logs
+                  {demoStatus?.internalLogs && demoStatus.internalLogs.length > 0 && (
+                    <Badge variant="secondary" className="h-5 text-xs ml-1">
+                      {demoStatus.internalLogs.length}
+                    </Badge>
+                  )}
+                </TabsTrigger>
+              </TabsList>
 
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Stage Analysis</CardTitle>
-                  <CardDescription>
-                    Detailed breakdown of each autonomous healing phase
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-[500px]">
-                    <div className="pr-4">
-                      {demoStatus?.stageDetails && Object.keys(demoStatus.stageDetails).length > 0 ? (
-                        <StageDetailsPanel 
-                          stageDetails={demoStatus.stageDetails} 
-                          currentStage={demoStatus.stage} 
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                          <Clock className="h-8 w-8 mb-2" />
-                          <p>Stage details will appear as the scenario progresses</p>
-                        </div>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
+              <TabsContent value="timeline" className="mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Live Event Timeline</CardTitle>
+                    <CardDescription>
+                      Real-time events from the agentic framework with detailed metrics
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <EventTimeline events={demoStatus?.events || []} />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="stages" className="mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Stage Analysis</CardTitle>
+                    <CardDescription>
+                      Detailed breakdown of each autonomous healing phase
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ScrollArea className="h-[500px]">
+                      <div className="pr-4">
+                        {demoStatus?.stageDetails && Object.keys(demoStatus.stageDetails).length > 0 ? (
+                          <StageDetailsPanel 
+                            stageDetails={demoStatus.stageDetails} 
+                            currentStage={demoStatus.stage} 
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                            <Clock className="h-8 w-8 mb-2" />
+                            <p>Stage details will appear as the scenario progresses</p>
+                          </div>
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="internal-logs" className="mt-0">
+                <AgentInternalLogs logs={demoStatus?.internalLogs || []} />
+              </TabsContent>
+            </Tabs>
           </div>
         )}
 
