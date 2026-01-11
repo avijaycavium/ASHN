@@ -1,11 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, Filter, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import type { Device } from "@shared/schema";
+import { queryClient } from "@/lib/queryClient";
+import type { Device, SSEMessage } from "@shared/schema";
 
 const statusColors = {
   healthy: "bg-status-online",
@@ -15,9 +17,43 @@ const statusColors = {
 };
 
 export default function TopologyPage() {
+  const [isSSEConnected, setIsSSEConnected] = useState(false);
+
   const { data: devices, isLoading } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
   });
+
+  // Subscribe to SSE for real-time device status updates
+  useEffect(() => {
+    const eventSource = new EventSource("/api/stream/events");
+    
+    eventSource.onopen = () => {
+      setIsSSEConnected(true);
+    };
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const message: SSEMessage = JSON.parse(event.data);
+        
+        // Refresh devices when their status changes
+        if (message.type === "device_status_changed" || 
+            message.type === "incident_created" ||
+            message.type === "incident_resolved") {
+          queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+        }
+      } catch (e) {
+        console.error("Failed to parse SSE message:", e);
+      }
+    };
+    
+    eventSource.onerror = () => {
+      setIsSSEConnected(false);
+    };
+    
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   const coreDevices = devices?.filter(d => d.type === "core") || [];
   const spineDevices = devices?.filter(d => d.type === "spine") || [];

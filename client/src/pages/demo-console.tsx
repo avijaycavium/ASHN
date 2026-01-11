@@ -43,7 +43,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Device } from "@shared/schema";
+import type { Device, SSEMessage } from "@shared/schema";
 import { AgentInternalLogs } from "@/components/dashboard/agent-internal-logs";
 import { WorkflowStorageAnalysis } from "@/components/dashboard/workflow-storage-analysis";
 import { Database } from "lucide-react";
@@ -1009,6 +1009,37 @@ export default function DemoConsolePage() {
       return () => clearInterval(interval);
     }
   }, [demoStatus?.active, refetchStatus]);
+
+  // Subscribe to SSE for real-time updates
+  useEffect(() => {
+    const eventSource = new EventSource("/api/stream/events");
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const message: SSEMessage = JSON.parse(event.data);
+        
+        // Refresh data when incident or stage changes occur
+        if (message.type === "incident_created" || 
+            message.type === "incident_updated" || 
+            message.type === "incident_resolved" ||
+            message.type === "stage_changed" ||
+            message.type === "agent_log") {
+          refetchStatus();
+        }
+        
+        // Refresh devices when their status changes
+        if (message.type === "device_status_changed") {
+          queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+        }
+      } catch (e) {
+        console.error("Failed to parse SSE message:", e);
+      }
+    };
+    
+    return () => {
+      eventSource.close();
+    };
+  }, [refetchStatus]);
 
   // Direct start for manual scenario selection (no device recommendation)
   const handleStartScenario = (scenarioId: string) => {

@@ -12,10 +12,27 @@ import type {
   AgentType,
   Incident,
   Device,
+  SSEMessage,
+  SSEEventType,
 } from "@shared/schema";
 import { storage } from "./storage";
+import { databaseStorage } from "./database-storage";
 import { getGNS3Client, getGNS3Config } from "./gns3";
 import OpenAI from "openai";
+import { EventEmitter } from "events";
+
+// SSE Event Emitter for real-time updates
+export const sseEmitter = new EventEmitter();
+sseEmitter.setMaxListeners(100);
+
+export function broadcastSSE(type: SSEEventType, data: unknown): void {
+  const message: SSEMessage = {
+    type,
+    data,
+    timestamp: new Date().toISOString(),
+  };
+  sseEmitter.emit("message", message);
+}
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1181,7 +1198,42 @@ class AgentOrchestrator {
     targetDeviceId?: string
   ): Promise<{ success: boolean; incidentId: string; message: string }> {
     const now = new Date();
-    const incidentId = `DEMO-${now.getTime()}`;
+    
+    // Create a real incident in the database if deviceId is provided
+    let incident: Incident | null = null;
+    let incidentId: string;
+    
+    if (deviceId) {
+      try {
+        incident = await databaseStorage.createIncidentFromFault(
+          deviceId,
+          scenario,
+          scenario === "link_failure" ? "critical" : "high"
+        );
+        incidentId = incident.id;
+        
+        // Broadcast incident creation via SSE
+        broadcastSSE("incident_created", incident);
+        
+        // Create initial incident event
+        await databaseStorage.createIncidentEvent({
+          id: `evt-${randomUUID()}`,
+          incidentId,
+          stage: "detection",
+          eventType: "stage_started",
+          title: "Fault Injection Initiated",
+          description: `${scenario.replace(/_/g, " ")} scenario initiated on device ${deviceId}`,
+          metadata: { scenario, deviceId, targetDeviceId },
+        });
+        
+        console.log(`[Orchestrator] Created incident ${incidentId} for fault ${scenario} on device ${deviceId}`);
+      } catch (error) {
+        console.error("[Orchestrator] Failed to create incident:", error);
+        incidentId = `DEMO-${now.getTime()}`;
+      }
+    } else {
+      incidentId = `DEMO-${now.getTime()}`;
+    }
     
     this.demoScenario = {
       active: true,
@@ -1244,13 +1296,13 @@ class AgentOrchestrator {
     this.logEvent("system", null, "status_change", `Demo: ${event}`, { stage, agent, ...details });
   }
 
-  private addInternalLog(
+  private async addInternalLog(
     stage: string,
     agent: string,
     logType: "network_data" | "llm_context" | "tool_call" | "reasoning" | "decision",
     title: string,
     content: Record<string, unknown>
-  ): void {
+  ): Promise<void> {
     if (!this.demoScenario.internalLogs) {
       this.demoScenario.internalLogs = [];
     }
@@ -1262,6 +1314,81 @@ class AgentOrchestrator {
       title,
       content,
     });
+    
+    // Persist to database if we have an incident ID
+    const incidentId = this.demoScenario.incidentId;
+    if (incidentId && incidentId.startsWith("INC-")) {
+      try {
+        const log = await databaseStorage.createAgentInternalLog({
+          id: `log-${randomUUID()}`,
+          incidentId,
+          stage: stage as "detection" | "rca" | "remediation" | "verification",
+          agentRole: agent,
+          logType: logType === "network_data" ? "info" : logType === "reasoning" ? "info" : logType === "decision" ? "info" : logType as "tool_call" | "llm_context",
+          title,
+          content: JSON.stringify(content),
+          metadata: content,
+        });
+        
+        // Broadcast log update via SSE
+        broadcastSSE("agent_log", log);
+      } catch (error) {
+        console.error("[Orchestrator] Failed to persist agent log:", error);
+      }
+    }
+  }
+
+  private async setStage(
+    stage: "detection" | "diagnosis" | "remediation" | "verification" | "resolved",
+    title: string,
+    description: string
+  ): Promise<void> {
+    this.demoScenario.stage = stage;
+    
+    // Broadcast stage change via SSE
+    broadcastSSE("stage_changed", {
+      incidentId: this.demoScenario.incidentId,
+      stage,
+      title,
+      timestamp: new Date().toISOString(),
+    });
+    
+    // Persist stage event if we have a real incident
+    const incidentId = this.demoScenario.incidentId;
+    if (incidentId && incidentId.startsWith("INC-")) {
+      try {
+        // Update incident status based on stage
+        const statusMap: Record<string, string> = {
+          detection: "active",
+          diagnosis: "investigating",
+          remediation: "remediating",
+          verification: "remediating",
+          resolved: "resolved",
+        };
+        
+        await databaseStorage.updateIncident(incidentId, {
+          status: statusMap[stage] as "active" | "investigating" | "remediating" | "resolved",
+        });
+        
+        await databaseStorage.createIncidentEvent({
+          id: `evt-${randomUUID()}`,
+          incidentId,
+          stage: stage === "diagnosis" ? "rca" : stage as "detection" | "rca" | "remediation" | "verification",
+          eventType: "stage_started",
+          title,
+          description,
+          metadata: { stage, deviceId: this.demoScenario.deviceId },
+        });
+        
+        // Broadcast incident update
+        const updatedIncident = await databaseStorage.getIncident(incidentId);
+        if (updatedIncident) {
+          broadcastSSE("incident_updated", updatedIncident);
+        }
+      } catch (error) {
+        console.error("[Orchestrator] Failed to persist stage change:", error);
+      }
+    }
   }
 
   private async runDemoScenario(
@@ -1275,7 +1402,7 @@ class AgentOrchestrator {
 
     try {
       await delay(2000);
-      this.demoScenario.stage = "detection";
+      await this.setStage("detection", "Detection Started", "Telemetry agents analyzing network metrics");
 
       this.addInternalLog("detection", "DetectionAgent", "llm_context", "LLM Prompt: Anomaly Detection Request", {
         system_prompt: "You are a network anomaly detection agent. Analyze the provided metrics and identify any anomalies that deviate from established baselines.",
@@ -1457,9 +1584,9 @@ class AgentOrchestrator {
       }
 
       await delay(2000);
-      this.demoScenario.stage = "diagnosis";
+      await this.setStage("diagnosis", "RCA Started", "Root Cause Analysis agent analyzing fault patterns");
 
-      this.addInternalLog("rca", "RCAAgent", "llm_context", "LLM Prompt: Root Cause Analysis Request", {
+      await this.addInternalLog("rca", "RCAAgent", "llm_context", "LLM Prompt: Root Cause Analysis Request", {
         system_prompt: "You are a network root cause analysis expert. Given the detected anomaly and diagnostic data, identify the most likely root cause using hypothesis-driven reasoning.",
         user_message: `Fault detected: ${scenario}. Analyze potential causes: hardware failure, configuration error, traffic surge, software bug. Device: ${deviceId || "network-wide"}.`,
         model: "gpt-4o",
@@ -1603,9 +1730,9 @@ class AgentOrchestrator {
       });
 
       await delay(2000);
-      this.demoScenario.stage = "remediation";
+      await this.setStage("remediation", "Remediation Started", "Remediation agent executing corrective actions");
 
-      this.addInternalLog("remediation", "RemediationAgent", "llm_context", "LLM Prompt: Remediation Plan Request", {
+      await this.addInternalLog("remediation", "RemediationAgent", "llm_context", "LLM Prompt: Remediation Plan Request", {
         system_prompt: "You are a network remediation agent. Generate a safe, reversible action plan based on the root cause and available playbooks.",
         user_message: `Root cause: ${scenario}. Available actions: routing_convergence, qos_policy, rate_limiting, workload_migration. Generate remediation plan with rollback steps.`,
         model: "gpt-4o",
@@ -1783,7 +1910,7 @@ class AgentOrchestrator {
       });
 
       await delay(3000);
-      this.demoScenario.stage = "verification";
+      await this.setStage("verification", "Verification Started", "Verification agent validating remediation success");
       const verificationStartTime = Date.now();
 
       this.addInternalLog("verification", "VerificationAgent", "llm_context", "LLM Prompt: Verification Assessment Request", {
@@ -1954,10 +2081,41 @@ class AgentOrchestrator {
       });
 
       await delay(2000);
-      this.demoScenario.stage = "resolved";
+      await this.setStage("resolved", "Incident Resolved", "Self-healing workflow completed successfully");
       const totalTime = Math.round((Date.now() - startTime) / 1000);
+      
+      // Finalize incident in database
+      if (incidentId.startsWith("INC-")) {
+        try {
+          const ttd = this.demoScenario.stageDetails.detection?.ttd || 5;
+          const ttr = this.demoScenario.stageDetails.verification?.ttr || (totalTime - ttd);
+          
+          await databaseStorage.updateIncident(incidentId, {
+            status: "resolved",
+            ttr,
+            tttr: totalTime,
+            resolvedAt: new Date().toISOString(),
+            rootCause: `Autonomous detection and remediation of ${scenario} fault`,
+            confidence: 98,
+          });
+          
+          // Reset device status to healthy
+          if (deviceId) {
+            await databaseStorage.updateDevice(deviceId, { status: "healthy" });
+            broadcastSSE("device_status_changed", { deviceId, status: "healthy" });
+          }
+          
+          // Broadcast final incident state
+          const finalIncident = await databaseStorage.getIncident(incidentId);
+          if (finalIncident) {
+            broadcastSSE("incident_resolved", finalIncident);
+          }
+        } catch (error) {
+          console.error("[Orchestrator] Failed to finalize incident:", error);
+        }
+      }
 
-      this.addInternalLog("resolved", "Orchestrator", "decision", "Incident Resolution Summary", {
+      await this.addInternalLog("verification", "Orchestrator", "decision", "Incident Resolution Summary", {
         incident_id: incidentId,
         resolution_status: "SUCCESS",
         total_time_seconds: totalTime,

@@ -472,3 +472,107 @@ export type Conversation = typeof conversations.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertMessage = z.infer<typeof insertMessageSchema>;
+
+// Incident Events - Track stage transitions and timeline
+export const incidentEvents = pgTable("incident_events", {
+  id: text("id").primaryKey(),
+  incidentId: text("incident_id").notNull().references(() => incidents.id),
+  stage: text("stage").notNull(), // detection, rca, remediation, verification
+  eventType: text("event_type").notNull(), // stage_started, stage_completed, action_taken, error
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  metadata: jsonb("metadata").notNull().default({}),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertIncidentEventSchema = createInsertSchema(incidentEvents).omit({ createdAt: true });
+export type InsertIncidentEvent = z.infer<typeof insertIncidentEventSchema>;
+export type DbIncidentEvent = typeof incidentEvents.$inferSelect;
+
+export interface IncidentEvent {
+  id: string;
+  incidentId: string;
+  stage: "detection" | "rca" | "remediation" | "verification";
+  eventType: "stage_started" | "stage_completed" | "action_taken" | "error";
+  title: string;
+  description: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+// Agent Internal Logs - Persist all agent logs with LLM context
+export const agentInternalLogs = pgTable("agent_internal_logs", {
+  id: text("id").primaryKey(),
+  incidentId: text("incident_id").notNull().references(() => incidents.id),
+  stage: text("stage").notNull(), // detection, rca, remediation, verification
+  agentRole: text("agent_role").notNull(), // e.g., DetectionAgent, RCAAgent
+  logType: text("log_type").notNull(), // info, warning, error, tool_call, llm_context
+  title: text("title").notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata").notNull().default({}), // For tool calls, LLM context, etc.
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const insertAgentInternalLogSchema = createInsertSchema(agentInternalLogs).omit({ createdAt: true });
+export type InsertAgentInternalLog = z.infer<typeof insertAgentInternalLogSchema>;
+export type DbAgentInternalLog = typeof agentInternalLogs.$inferSelect;
+
+export interface AgentInternalLog {
+  id: string;
+  incidentId: string;
+  stage: "detection" | "rca" | "remediation" | "verification";
+  agentRole: string;
+  logType: "info" | "warning" | "error" | "tool_call" | "llm_context";
+  title: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+// Telemetry Collection - Real-time telemetry events
+export interface TelemetryEvent {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  timestamp: string;
+  metrics: {
+    cpu: number;
+    memory: number;
+    portUtilization: number;
+    latency: number;
+    bgpPeers: number;
+    packetDrops: number;
+  };
+  collectionStatus: "success" | "partial" | "failed";
+}
+
+// Anomaly Detection Event
+export interface AnomalyEvent {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  timestamp: string;
+  metricName: string;
+  currentValue: number;
+  threshold: number;
+  severity: "low" | "medium" | "high" | "critical";
+  triggered: boolean;
+  incidentId?: string;
+}
+
+// SSE Event Types
+export type SSEEventType = 
+  | "incident_created"
+  | "incident_updated"
+  | "incident_resolved"
+  | "stage_changed"
+  | "agent_log"
+  | "device_status_changed"
+  | "telemetry_update"
+  | "anomaly_detected";
+
+export interface SSEMessage {
+  type: SSEEventType;
+  data: unknown;
+  timestamp: string;
+}

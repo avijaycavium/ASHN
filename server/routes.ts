@@ -5,7 +5,8 @@ import { databaseStorage } from "./database-storage";
 import { metricsCollector } from "./metrics-collector";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 import { getCopilot } from "./copilot";
-import { orchestrator } from "./orchestrator";
+import { orchestrator, sseEmitter, broadcastSSE } from "./orchestrator";
+import type { SSEMessage } from "@shared/schema";
 import { 
   updateMetricsCache, 
   getAllMetrics, 
@@ -1134,6 +1135,89 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to inject fault with healing" });
+    }
+  });
+
+  // ===== SSE Stream Endpoints =====
+  
+  // Unified SSE stream for all real-time updates
+  app.get("/api/stream/events", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+
+    // Send initial connection confirmation
+    res.write(`data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`);
+
+    // Listen for SSE messages from the emitter
+    const onMessage = (message: SSEMessage) => {
+      res.write(`data: ${JSON.stringify(message)}\n\n`);
+    };
+
+    sseEmitter.on("message", onMessage);
+
+    // Send heartbeat every 30 seconds to keep connection alive
+    const heartbeat = setInterval(() => {
+      res.write(`data: ${JSON.stringify({ type: "heartbeat", timestamp: new Date().toISOString() })}\n\n`);
+    }, 30000);
+
+    // Cleanup on client disconnect
+    req.on("close", () => {
+      sseEmitter.off("message", onMessage);
+      clearInterval(heartbeat);
+    });
+  });
+
+  // Get agent internal logs for a specific incident
+  app.get("/api/incidents/:id/logs", async (req, res) => {
+    try {
+      const incidentId = req.params.id;
+      const logs = await databaseStorage.getAgentInternalLogs(incidentId);
+      res.json(logs);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch incident logs" });
+    }
+  });
+
+  // Get incident events for a specific incident
+  app.get("/api/incidents/:id/events", async (req, res) => {
+    try {
+      const incidentId = req.params.id;
+      const events = await databaseStorage.getIncidentEvents(incidentId);
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch incident events" });
+    }
+  });
+
+  // Broadcast manual telemetry update (for testing)
+  app.post("/api/stream/telemetry", async (req, res) => {
+    try {
+      const { deviceId, metrics } = req.body;
+      broadcastSSE("telemetry_update", { deviceId, metrics, timestamp: new Date().toISOString() });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to broadcast telemetry" });
+    }
+  });
+
+  // Broadcast manual anomaly event (for testing)
+  app.post("/api/stream/anomaly", async (req, res) => {
+    try {
+      const { deviceId, metric, value, threshold, anomalyType } = req.body;
+      broadcastSSE("anomaly_detected", { 
+        deviceId, 
+        metric, 
+        value, 
+        threshold, 
+        anomalyType,
+        timestamp: new Date().toISOString() 
+      });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to broadcast anomaly" });
     }
   });
 

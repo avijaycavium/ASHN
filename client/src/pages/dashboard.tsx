@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw, Download, Clock } from "lucide-react";
+import { useEffect, useState } from "react";
+import { RefreshCw, Download, Clock, Radio } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { KPICard } from "@/components/dashboard/kpi-card";
 import { DeviceHeatmap } from "@/components/dashboard/device-heatmap";
 import { IncidentList } from "@/components/dashboard/incident-list";
@@ -10,6 +12,7 @@ import { MetricChart } from "@/components/dashboard/metric-chart";
 import { AgentStatusCard } from "@/components/dashboard/agent-status";
 import { LearningUpdatesCard } from "@/components/dashboard/learning-updates";
 import { useLocation } from "wouter";
+import { queryClient } from "@/lib/queryClient";
 import type { 
   Device, 
   Incident, 
@@ -17,7 +20,8 @@ import type {
   SystemHealth, 
   MetricTrend, 
   Agent, 
-  LearningUpdate 
+  LearningUpdate,
+  SSEMessage
 } from "@shared/schema";
 
 function formatLastUpdated(): string {
@@ -31,6 +35,7 @@ function formatLastUpdated(): string {
 
 export default function Dashboard() {
   const [, navigate] = useLocation();
+  const [isSSEConnected, setIsSSEConnected] = useState(false);
 
   const { data: devices, isLoading: loadingDevices } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
@@ -59,6 +64,48 @@ export default function Dashboard() {
   const { data: learningUpdates, isLoading: loadingLearning } = useQuery<LearningUpdate[]>({
     queryKey: ["/api/learning"],
   });
+
+  // Subscribe to SSE for real-time updates
+  useEffect(() => {
+    const eventSource = new EventSource("/api/stream/events");
+    
+    eventSource.onopen = () => {
+      setIsSSEConnected(true);
+    };
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const message: SSEMessage = JSON.parse(event.data);
+        
+        // Refresh relevant queries based on event type
+        if (message.type === "incident_created" || 
+            message.type === "incident_updated" || 
+            message.type === "incident_resolved") {
+          queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/kpis"] });
+        }
+        
+        if (message.type === "device_status_changed" || message.type === "telemetry_update") {
+          queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/health"] });
+        }
+        
+        if (message.type === "agent_log") {
+          queryClient.invalidateQueries({ queryKey: ["/api/agents"] });
+        }
+      } catch (e) {
+        console.error("Failed to parse SSE message:", e);
+      }
+    };
+    
+    eventSource.onerror = () => {
+      setIsSSEConnected(false);
+    };
+    
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   const handleDeviceClick = (device: Device) => {
     navigate(`/devices/${device.id}`);

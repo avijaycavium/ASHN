@@ -8,6 +8,8 @@ import {
   remediationSteps,
   agents,
   metricsTimeseries,
+  incidentEvents,
+  agentInternalLogs,
   type Device,
   type Incident,
   type Agent,
@@ -21,6 +23,10 @@ import {
   type InsertRemediationStep,
   type InsertAgent,
   type InsertMetricsTimeseries,
+  type InsertIncidentEvent,
+  type InsertAgentInternalLog,
+  type IncidentEvent,
+  type AgentInternalLog,
   type SystemHealth,
   type KPIMetrics,
   type AuditEntry,
@@ -615,6 +621,163 @@ export class DatabaseStorage {
     }
     
     return updates;
+  }
+
+  // Incident Events CRUD
+  async createIncidentEvent(data: InsertIncidentEvent): Promise<IncidentEvent> {
+    await db.insert(incidentEvents).values(data);
+    return {
+      id: data.id,
+      incidentId: data.incidentId,
+      stage: data.stage as IncidentEvent["stage"],
+      eventType: data.eventType as IncidentEvent["eventType"],
+      title: data.title,
+      description: data.description,
+      metadata: (data.metadata as Record<string, unknown>) || {},
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async getIncidentEvents(incidentId: string): Promise<IncidentEvent[]> {
+    const rows = await db.select().from(incidentEvents)
+      .where(eq(incidentEvents.incidentId, incidentId))
+      .orderBy(incidentEvents.createdAt);
+    return rows.map((row) => ({
+      id: row.id,
+      incidentId: row.incidentId,
+      stage: row.stage as IncidentEvent["stage"],
+      eventType: row.eventType as IncidentEvent["eventType"],
+      title: row.title,
+      description: row.description,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async getAllIncidentEvents(): Promise<IncidentEvent[]> {
+    const rows = await db.select().from(incidentEvents)
+      .orderBy(desc(incidentEvents.createdAt));
+    return rows.map((row) => ({
+      id: row.id,
+      incidentId: row.incidentId,
+      stage: row.stage as IncidentEvent["stage"],
+      eventType: row.eventType as IncidentEvent["eventType"],
+      title: row.title,
+      description: row.description,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  // Agent Internal Logs CRUD
+  async createAgentInternalLog(data: InsertAgentInternalLog): Promise<AgentInternalLog> {
+    await db.insert(agentInternalLogs).values(data);
+    return {
+      id: data.id,
+      incidentId: data.incidentId,
+      stage: data.stage as AgentInternalLog["stage"],
+      agentRole: data.agentRole,
+      logType: data.logType as AgentInternalLog["logType"],
+      title: data.title,
+      content: data.content,
+      metadata: (data.metadata as Record<string, unknown>) || {},
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  async getAgentInternalLogs(incidentId: string): Promise<AgentInternalLog[]> {
+    const rows = await db.select().from(agentInternalLogs)
+      .where(eq(agentInternalLogs.incidentId, incidentId))
+      .orderBy(agentInternalLogs.createdAt);
+    return rows.map((row) => ({
+      id: row.id,
+      incidentId: row.incidentId,
+      stage: row.stage as AgentInternalLog["stage"],
+      agentRole: row.agentRole,
+      logType: row.logType as AgentInternalLog["logType"],
+      title: row.title,
+      content: row.content,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async getAllAgentInternalLogs(limit: number = 100): Promise<AgentInternalLog[]> {
+    const rows = await db.select().from(agentInternalLogs)
+      .orderBy(desc(agentInternalLogs.createdAt))
+      .limit(limit);
+    return rows.map((row) => ({
+      id: row.id,
+      incidentId: row.incidentId,
+      stage: row.stage as AgentInternalLog["stage"],
+      agentRole: row.agentRole,
+      logType: row.logType as AgentInternalLog["logType"],
+      title: row.title,
+      content: row.content,
+      metadata: (row.metadata as Record<string, unknown>) || {},
+      createdAt: row.createdAt.toISOString(),
+    }));
+  }
+
+  async createIncidentFromFault(
+    deviceId: string,
+    faultType: string,
+    severity: string = "high"
+  ): Promise<Incident> {
+    const device = await this.getDevice(deviceId);
+    const deviceName = device?.name || deviceId;
+    const incidentId = await this.getNextIncidentId();
+    
+    const faultDescriptions: Record<string, { title: string; description: string }> = {
+      link_failure: {
+        title: `Link Failure Detected on ${deviceName}`,
+        description: `Port operational status changed to DOWN. Link failure detected requiring immediate investigation and remediation.`,
+      },
+      port_congestion: {
+        title: `Port Congestion on ${deviceName}`,
+        description: `High port utilization and packet queuing detected. Traffic exceeding capacity thresholds.`,
+      },
+      dpu_overload: {
+        title: `DPU Overload on ${deviceName}`,
+        description: `Data Processing Unit experiencing high CPU/memory utilization affecting packet processing performance.`,
+      },
+      bgp_link_flap: {
+        title: `BGP Link Flap on ${deviceName}`,
+        description: `Rapid port state oscillations detected causing BGP session instability.`,
+      },
+      bgp_session_instability: {
+        title: `BGP Session Instability on ${deviceName}`,
+        description: `BGP peer session oscillating between established and down states.`,
+      },
+      traffic_drop: {
+        title: `Traffic Drop on ${deviceName}`,
+        description: `Significant packet loss detected on device interfaces.`,
+      },
+    };
+
+    const faultInfo = faultDescriptions[faultType] || {
+      title: `Fault Detected on ${deviceName}`,
+      description: `Fault type: ${faultType} detected on device.`,
+    };
+
+    const incident = await this.createIncident({
+      id: incidentId,
+      title: faultInfo.title,
+      description: faultInfo.description,
+      severity: severity as "critical" | "high" | "medium" | "low",
+      status: "active",
+      ttd: 0,
+      ttr: null,
+      tttr: null,
+      affectedDevices: [deviceId],
+      rootCause: null,
+      confidence: 0,
+    });
+
+    // Update device status
+    await this.updateDevice(deviceId, { status: severity === "critical" ? "critical" : "degraded" });
+
+    return incident;
   }
 }
 

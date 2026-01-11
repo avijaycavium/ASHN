@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
+import { useState, useEffect } from "react";
 import { 
   AlertTriangle, 
   Filter, 
@@ -7,7 +8,8 @@ import {
   Search,
   CheckCircle2,
   Clock,
-  XCircle
+  XCircle,
+  Radio
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,8 +32,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
-import type { Incident, IncidentSeverity, IncidentStatus } from "@shared/schema";
+import { queryClient } from "@/lib/queryClient";
+import type { Incident, IncidentSeverity, IncidentStatus, SSEMessage } from "@shared/schema";
 
 const severityConfig: Record<IncidentSeverity, { color: string; icon: React.ReactNode }> = {
   critical: { color: "bg-status-busy text-white", icon: <AlertTriangle className="h-3 w-3" /> },
@@ -62,10 +64,44 @@ export default function IncidentsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [severityFilter, setSeverityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [isSSEConnected, setIsSSEConnected] = useState(false);
 
   const { data: incidents, isLoading } = useQuery<Incident[]>({
     queryKey: ["/api/incidents"],
   });
+
+  // Subscribe to SSE for real-time updates
+  useEffect(() => {
+    const eventSource = new EventSource("/api/stream/events");
+    
+    eventSource.onopen = () => {
+      setIsSSEConnected(true);
+    };
+    
+    eventSource.onmessage = (event) => {
+      try {
+        const message: SSEMessage = JSON.parse(event.data);
+        
+        // Refresh incidents on relevant events
+        if (message.type === "incident_created" || 
+            message.type === "incident_updated" || 
+            message.type === "incident_resolved" ||
+            message.type === "stage_changed") {
+          queryClient.invalidateQueries({ queryKey: ["/api/incidents"] });
+        }
+      } catch (e) {
+        console.error("Failed to parse SSE message:", e);
+      }
+    };
+    
+    eventSource.onerror = () => {
+      setIsSSEConnected(false);
+    };
+    
+    return () => {
+      eventSource.close();
+    };
+  }, []);
 
   const filteredIncidents = incidents?.filter((incident) => {
     const matchesSearch = 
