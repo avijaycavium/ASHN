@@ -161,7 +161,7 @@ export async function registerRoutes(
 
   app.get("/api/audit", async (req, res) => {
     try {
-      const entries = await storage.getAuditEntries();
+      const entries = await databaseStorage.getAuditEntries();
       res.json(entries);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch audit entries" });
@@ -170,7 +170,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/trends", async (req, res) => {
     try {
-      const trends = await storage.getMetricTrends();
+      const trends = await databaseStorage.getMetricTrends();
       res.json(trends);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch metric trends" });
@@ -179,7 +179,7 @@ export async function registerRoutes(
 
   app.get("/api/health", async (req, res) => {
     try {
-      const health = await storage.getSystemHealth();
+      const health = await databaseStorage.getSystemHealth();
       res.json(health);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch system health" });
@@ -188,7 +188,7 @@ export async function registerRoutes(
 
   app.get("/api/kpis", async (req, res) => {
     try {
-      const kpis = await storage.getKPIMetrics();
+      const kpis = await databaseStorage.getKPIMetrics();
       res.json(kpis);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch KPI metrics" });
@@ -197,7 +197,7 @@ export async function registerRoutes(
 
   app.get("/api/learning", async (req, res) => {
     try {
-      const updates = await storage.getLearningUpdates();
+      const updates = await databaseStorage.getLearningUpdates();
       res.json(updates);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch learning updates" });
@@ -627,7 +627,7 @@ export async function registerRoutes(
   // Metrics API endpoints
   app.get("/api/metrics/refresh", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       res.json({ success: true, message: "Metrics cache refreshed", deviceCount: devices.length });
     } catch (error) {
@@ -637,7 +637,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/all", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const metrics = getAllMetrics();
       res.json(metrics);
@@ -648,7 +648,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/device/:deviceId", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const metrics = getDeviceMetrics(req.params.deviceId);
       if (!metrics) {
@@ -662,7 +662,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/system", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const summary = getSystemMetricsSummary();
       res.json(summary);
@@ -673,7 +673,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/bgp", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const bgpStatus = getBGPPeerStatus();
       res.json(bgpStatus);
@@ -684,7 +684,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/ports", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const portStatus = getPortStatus();
       res.json(portStatus);
@@ -699,7 +699,7 @@ export async function registerRoutes(
       if (!query) {
         return res.status(400).json({ error: "Query is required" });
       }
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const result = await executePromQLQuery(query);
       res.json(result);
@@ -710,7 +710,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/anomalies", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices);
       const anomalies = detectAnomalies();
       res.json(anomalies);
@@ -721,7 +721,7 @@ export async function registerRoutes(
 
   app.get("/api/metrics/prometheus", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       const allMetrics = generateAllDeviceMetrics(devices);
       const prometheusFormat = formatPrometheusMetrics(allMetrics);
       res.set("Content-Type", "text/plain");

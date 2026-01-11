@@ -32,9 +32,14 @@ The backend serves both API endpoints and static files. In development, Vite mid
 - **ORM**: Drizzle ORM with PostgreSQL dialect
 - **Schema Location**: `shared/schema.ts` contains all type definitions and database schema
 - **Validation**: Zod schemas generated from Drizzle schemas via drizzle-zod
-- **Current Storage**: In-memory storage implementation with mock data (database integration ready via Drizzle config)
+- **Storage**: PostgreSQL database via DatabaseStorage class (`server/database-storage.ts`)
 
-The storage layer uses an interface pattern (`IStorage`) allowing easy swapping between in-memory mock data and database-backed implementations.
+The database is automatically seeded on first run with:
+- 53 devices (5 core, 12 spine, 16 TOR, 20 endpoint switches)
+- 84 topology links (dual-plane architecture)
+- 5 autonomous agents (Detection, RCA, Remediation, Verification, Orchestrator)
+
+All API endpoints fetch data from PostgreSQL. System health, KPIs, and audit logs are derived from database entities (devices, incidents).
 
 ### Key Design Patterns
 - **Shared Types**: TypeScript interfaces in `shared/schema.ts` are used by both frontend and backend

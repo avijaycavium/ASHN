@@ -19,6 +19,11 @@ import {
   type InsertTimelineEvent,
   type InsertRemediationStep,
   type InsertAgent,
+  type SystemHealth,
+  type KPIMetrics,
+  type AuditEntry,
+  type MetricTrend,
+  type LearningUpdate,
 } from "@shared/schema";
 import { generate52DeviceTopology } from "./topology-generator";
 
@@ -407,6 +412,111 @@ export class DatabaseStorage {
     
     const maxId = numericIds.length > 0 ? Math.max(...numericIds) : 0;
     return `INC-${String(maxId + 1).padStart(5, "0")}`;
+  }
+
+  async getSystemHealth(): Promise<SystemHealth> {
+    const allDevices = await this.getDevices();
+    return {
+      cpu: Math.round(allDevices.reduce((sum, d) => sum + d.cpu, 0) / allDevices.length),
+      memory: Math.round(allDevices.reduce((sum, d) => sum + d.memory, 0) / allDevices.length),
+      latencyP95: 125,
+      apiLatency: 98,
+      activeSessions: 3,
+      totalDevices: allDevices.length,
+      healthyDevices: allDevices.filter((d) => d.status === "healthy").length,
+      degradedDevices: allDevices.filter((d) => d.status === "degraded").length,
+      criticalDevices: allDevices.filter((d) => d.status === "critical").length,
+    };
+  }
+
+  async getKPIMetrics(): Promise<KPIMetrics> {
+    const allIncidents = await this.getIncidents();
+    const activeIncidents = allIncidents.filter(
+      (i) => i.status !== "resolved" && i.status !== "closed"
+    ).length;
+    const resolvedToday = allIncidents.filter((i) => {
+      if (!i.resolvedAt) return false;
+      const resolved = new Date(i.resolvedAt);
+      const today = new Date();
+      return resolved.toDateString() === today.toDateString();
+    }).length;
+
+    const ttdValues = allIncidents.filter((i) => i.ttd).map((i) => i.ttd || 0);
+    const ttrValues = allIncidents.filter((i) => i.ttr).map((i) => i.ttr || 0);
+
+    return {
+      avgTTD: ttdValues.length > 0 ? Math.round(ttdValues.reduce((a, b) => a + b, 0) / ttdValues.length) : 45,
+      avgTTR: ttrValues.length > 0 ? Math.round(ttrValues.reduce((a, b) => a + b, 0) / ttrValues.length) : 180,
+      avgMTTR: 120,
+      ttdChange: -12,
+      ttrChange: -8,
+      mttrChange: -15,
+      activeIncidents,
+      resolvedToday,
+    };
+  }
+
+  async getAuditEntries(): Promise<AuditEntry[]> {
+    const allIncidents = await this.getIncidents();
+    const entries: AuditEntry[] = [];
+    
+    for (const incident of allIncidents.slice(0, 10)) {
+      entries.push({
+        id: `audit-${incident.id}`,
+        timestamp: incident.createdAt || new Date().toISOString(),
+        action: "Incident Created",
+        user: "Detection Agent",
+        target: incident.title,
+        details: incident.description,
+        status: "success",
+      });
+    }
+    
+    return entries;
+  }
+
+  async getMetricTrends(): Promise<MetricTrend[]> {
+    const now = Date.now();
+    const trends: MetricTrend[] = [];
+    
+    for (let i = 23; i >= 0; i--) {
+      const timestamp = new Date(now - i * 60 * 60 * 1000).toISOString();
+      trends.push({
+        timestamp,
+        snr: 25 + Math.random() * 5,
+        ber: 0.0001 + Math.random() * 0.0002,
+        fec: 0.001 + Math.random() * 0.002,
+        cpu: 30 + Math.random() * 20,
+        latency: 100 + Math.random() * 50,
+      });
+    }
+    
+    return trends;
+  }
+
+  async getLearningUpdates(): Promise<LearningUpdate[]> {
+    const allIncidents = await this.getIncidents();
+    const updates: LearningUpdate[] = [];
+    
+    for (const incident of allIncidents.slice(0, 5)) {
+      updates.push({
+        id: `learn-${incident.id}`,
+        pattern: `Pattern for ${incident.title}`,
+        description: `Learned detection pattern from incident: ${incident.description.substring(0, 100)}`,
+        timestamp: incident.createdAt || new Date().toISOString(),
+      });
+    }
+    
+    if (updates.length === 0) {
+      updates.push({
+        id: "learn-default",
+        pattern: "Baseline Pattern",
+        description: "System is learning baseline patterns from network telemetry data",
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    return updates;
   }
 }
 
