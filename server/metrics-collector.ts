@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { metricsTimeseries, devices, type InsertMetricsTimeseries } from "@shared/schema";
-import { getDeviceMetrics } from "./telemetry-exporter";
+import { generateDeviceMetrics } from "./telemetry-exporter";
 
 class MetricsCollector {
   private intervalId: NodeJS.Timeout | null = null;
@@ -41,37 +41,20 @@ class MetricsCollector {
       const metricsToInsert: InsertMetricsTimeseries[] = [];
 
       for (const device of allDevices) {
-        const deviceMetrics = getDeviceMetrics(device.id);
+        const deviceMetrics = generateDeviceMetrics(device as any);
+        const bgpPeers = device.type === 'endpoint' ? 0 : 
+          (device.bgpConfig as any)?.neighbors?.length || 0;
         
-        if (deviceMetrics) {
-          const bgpPeers = device.type === 'endpoint' ? 0 : 
-            (device.bgpConfig as any)?.neighbors?.length || 0;
-          
-          metricsToInsert.push({
-            deviceId: device.id,
-            collectedAt: now,
-            cpu: deviceMetrics.system?.cpuUsage || device.cpu,
-            memory: deviceMetrics.system?.memoryUsage || device.memory,
-            portUtilization: deviceMetrics.port?.utilization || Math.random() * 60 + 20,
-            latency: deviceMetrics.port?.latencyUs ? deviceMetrics.port.latencyUs / 1000 : Math.random() * 10 + 2,
-            packetDrops: deviceMetrics.port?.rxDrops || Math.floor(Math.random() * 30),
-            bgpPeers: deviceMetrics.bgp?.peerCount || bgpPeers,
-          });
-        } else {
-          const bgpPeers = device.type === 'endpoint' ? 0 : 
-            (device.bgpConfig as any)?.neighbors?.length || 0;
-          
-          metricsToInsert.push({
-            deviceId: device.id,
-            collectedAt: now,
-            cpu: device.cpu + (Math.random() - 0.5) * 10,
-            memory: device.memory + (Math.random() - 0.5) * 8,
-            portUtilization: Math.random() * 60 + 20,
-            latency: Math.random() * 10 + 2,
-            packetDrops: Math.floor(Math.random() * 30),
-            bgpPeers: bgpPeers,
-          });
-        }
+        metricsToInsert.push({
+          deviceId: device.id,
+          collectedAt: now,
+          cpu: deviceMetrics.system?.cpuUsage || device.cpu,
+          memory: deviceMetrics.system?.memoryUsage || device.memory,
+          portUtilization: deviceMetrics.port?.utilization || Math.random() * 60 + 20,
+          latency: deviceMetrics.port?.latencyUs ? deviceMetrics.port.latencyUs / 1000 : Math.random() * 10 + 2,
+          packetDrops: deviceMetrics.port?.rxDrops || Math.floor(Math.random() * 30),
+          bgpPeers: deviceMetrics.bgp?.peerCount || bgpPeers,
+        });
       }
 
       if (metricsToInsert.length > 0) {

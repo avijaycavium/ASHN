@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BarChart3, TrendingUp, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,16 +14,57 @@ import {
 import { useState } from "react";
 import type { MetricTrend, Device } from "@shared/schema";
 
+type TierFilter = "all" | "core" | "spine" | "tor" | "endpoint";
+
 export default function MetricsPage() {
   const [selectedDevice, setSelectedDevice] = useState<string>("all");
+  const [selectedTier, setSelectedTier] = useState<TierFilter>("all");
+  const queryClient = useQueryClient();
 
-  const { data: trends, isLoading: loadingTrends } = useQuery<MetricTrend[]>({
-    queryKey: ["/api/metrics/trends"],
+  const buildQueryParams = () => {
+    const params = new URLSearchParams();
+    if (selectedDevice !== "all") {
+      params.append("deviceId", selectedDevice);
+    } else if (selectedTier !== "all") {
+      params.append("tier", selectedTier);
+    }
+    params.append("hoursBack", "24");
+    params.append("limit", "500");
+    return params.toString();
+  };
+
+  const queryParams = buildQueryParams();
+
+  const { data: trends, isLoading: loadingTrends, refetch } = useQuery<MetricTrend[]>({
+    queryKey: ["/api/metrics/trends", selectedDevice, selectedTier],
+    queryFn: async () => {
+      const response = await fetch(`/api/metrics/trends?${queryParams}`);
+      if (!response.ok) throw new Error("Failed to fetch trends");
+      return response.json();
+    },
   });
 
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
   });
+
+  const handleRefresh = () => {
+    refetch();
+  };
+
+  const handleDeviceChange = (value: string) => {
+    setSelectedDevice(value);
+    if (value !== "all") {
+      setSelectedTier("all");
+    }
+  };
+
+  const handleTierChange = (value: TierFilter) => {
+    setSelectedTier(value);
+    if (value !== "all") {
+      setSelectedDevice("all");
+    }
+  };
 
   const currentMetrics = trends?.[trends.length - 1];
 
@@ -37,7 +78,19 @@ export default function MetricsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+          <Select value={selectedTier} onValueChange={(v) => handleTierChange(v as TierFilter)}>
+            <SelectTrigger className="w-36" data-testid="select-tier">
+              <SelectValue placeholder="Layer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Layers</SelectItem>
+              <SelectItem value="core">Core</SelectItem>
+              <SelectItem value="spine">Spine</SelectItem>
+              <SelectItem value="tor">TOR</SelectItem>
+              <SelectItem value="endpoint">Endpoint</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={selectedDevice} onValueChange={handleDeviceChange}>
             <SelectTrigger className="w-48" data-testid="select-device">
               <SelectValue placeholder="Select device" />
             </SelectTrigger>
@@ -50,7 +103,7 @@ export default function MetricsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" className="gap-1.5" data-testid="button-refresh">
+          <Button variant="outline" className="gap-1.5" data-testid="button-refresh" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4" />
             Refresh
           </Button>
