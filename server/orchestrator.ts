@@ -1764,6 +1764,16 @@ class AgentOrchestrator {
         execution_status: "SUCCESS"
       });
 
+      this.addInternalLog("remediation", "RemediationAgent", "llm_context", "LLM Response: Remediation Plan Generated", {
+        response_summary: `Remediation plan generated for ${scenario}`,
+        actions_planned: scenario === "link_failure" ? ["wait_for_routing_convergence", "monitor_alternate_paths"] :
+                         scenario === "port_congestion" ? ["apply_qos_policy", "configure_rate_limiting"] :
+                         ["migrate_workloads", "rebalance_containers"],
+        risk_assessment: scenario === "link_failure" ? "LOW" : "MEDIUM",
+        tokens_used: { prompt: 1089, completion: 378, total: 1467 },
+        latency_ms: 1823
+      });
+
       this.addInternalLog("remediation", "RemediationAgent", "decision", "Remediation Actions Complete", {
         actions_executed: scenario === "link_failure" ? ["routing_convergence_monitored"] :
                          scenario === "port_congestion" ? ["qos_policy_applied", "rate_limiting_configured"] :
