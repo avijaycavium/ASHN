@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Network, ZoomIn, ZoomOut, Maximize2, RefreshCw, X, Server, Activity, Cpu, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,10 +18,18 @@ const statusColors: Record<string, string> = {
   offline: "bg-status-offline",
 };
 
+interface NodePosition {
+  x: number;
+  y: number;
+}
+
 export default function TopologyPage() {
   const [isSSEConnected, setIsSSEConnected] = useState(false);
   const [hoveredDeviceId, setHoveredDeviceId] = useState<string | null>(null);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [nodePositions, setNodePositions] = useState<Map<string, NodePosition>>(new Map());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const nodeRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const { data: devices, isLoading: devicesLoading } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
@@ -30,6 +38,31 @@ export default function TopologyPage() {
   const { data: links, isLoading: linksLoading } = useQuery<TopologyLink[]>({
     queryKey: ["/api/topology/links"],
   });
+
+  // Calculate node positions for drawing lines
+  const updateNodePositions = useCallback(() => {
+    if (!containerRef.current) return;
+    
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const newPositions = new Map<string, NodePosition>();
+    
+    nodeRefs.current.forEach((element, deviceId) => {
+      const rect = element.getBoundingClientRect();
+      newPositions.set(deviceId, {
+        x: rect.left + rect.width / 2 - containerRect.left,
+        y: rect.top + rect.height / 2 - containerRect.top,
+      });
+    });
+    
+    setNodePositions(newPositions);
+  }, []);
+
+  // Update positions when devices change or on resize
+  useEffect(() => {
+    updateNodePositions();
+    window.addEventListener("resize", updateNodePositions);
+    return () => window.removeEventListener("resize", updateNodePositions);
+  }, [devices, updateNodePositions]);
 
   // Subscribe to SSE for real-time device status updates
   useEffect(() => {
@@ -100,12 +133,41 @@ export default function TopologyPage() {
     }
   }, []);
 
+  // Register node ref for position tracking
+  const registerNodeRef = useCallback((deviceId: string, element: HTMLDivElement | null) => {
+    if (element) {
+      nodeRefs.current.set(deviceId, element);
+    } else {
+      nodeRefs.current.delete(deviceId);
+    }
+  }, []);
+
   const coreDevices = devices?.filter(d => d.type === "core") || [];
   const spineDevices = devices?.filter(d => d.type === "spine") || [];
   const torDevices = devices?.filter(d => d.type === "tor") || [];
   const endpointDevices = devices?.filter(d => d.type === "endpoint") || [];
 
   const isLoading = devicesLoading || linksLoading;
+
+  // Get lines to draw when hovering
+  const getHoverLines = useCallback((): { from: NodePosition; to: NodePosition; targetId: string }[] => {
+    if (!hoveredDeviceId) return [];
+    
+    const hoveredPos = nodePositions.get(hoveredDeviceId);
+    if (!hoveredPos) return [];
+    
+    const connectedIds = getConnectedDeviceIds(hoveredDeviceId);
+    const lines: { from: NodePosition; to: NodePosition; targetId: string }[] = [];
+    
+    connectedIds.forEach(targetId => {
+      const targetPos = nodePositions.get(targetId);
+      if (targetPos) {
+        lines.push({ from: hoveredPos, to: targetPos, targetId });
+      }
+    });
+    
+    return lines;
+  }, [hoveredDeviceId, nodePositions, getConnectedDeviceIds]);
 
   // Device node component with hover and click handlers
   const DeviceNode = ({ 
@@ -135,16 +197,21 @@ export default function TopologyPage() {
 
     return (
       <div
+        ref={(el) => registerNodeRef(device.id, el)}
         data-device-node
+        data-device-id={device.id}
         className={cn(
-          "flex flex-col items-center gap-1 p-2 rounded-md cursor-pointer transition-all duration-200",
+          "flex flex-col items-center gap-1 p-2 rounded-md cursor-pointer transition-all duration-200 relative z-10",
           size === "lg" && "p-3",
           dimmed ? "opacity-30" : "opacity-100",
           isHovered && "ring-2 ring-primary ring-offset-2",
           isSelected && "ring-2 ring-primary",
           !dimmed && "hover-elevate"
         )}
-        onMouseEnter={() => setHoveredDeviceId(device.id)}
+        onMouseEnter={() => {
+          setHoveredDeviceId(device.id);
+          setTimeout(updateNodePositions, 0);
+        }}
         onMouseLeave={() => setHoveredDeviceId(null)}
         onClick={(e) => {
           e.stopPropagation();
@@ -173,6 +240,57 @@ export default function TopologyPage() {
     );
   };
 
+  // SVG overlay for drawing connection lines
+  const ConnectionLines = () => {
+    const lines = getHoverLines();
+    if (lines.length === 0) return null;
+
+    return (
+      <svg 
+        className="absolute inset-0 pointer-events-none z-0" 
+        style={{ width: '100%', height: '100%' }}
+      >
+        <defs>
+          <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0.4" />
+          </linearGradient>
+        </defs>
+        {lines.map((line, idx) => (
+          <g key={idx}>
+            <line
+              x1={line.from.x}
+              y1={line.from.y}
+              x2={line.to.x}
+              y2={line.to.y}
+              stroke="hsl(var(--primary))"
+              strokeWidth="2"
+              strokeOpacity="0.6"
+              strokeDasharray="4 2"
+              className="animate-pulse"
+            />
+            <circle
+              cx={line.to.x}
+              cy={line.to.y}
+              r="4"
+              fill="hsl(var(--primary))"
+              fillOpacity="0.8"
+            />
+          </g>
+        ))}
+        {hoveredDeviceId && nodePositions.get(hoveredDeviceId) && (
+          <circle
+            cx={nodePositions.get(hoveredDeviceId)!.x}
+            cy={nodePositions.get(hoveredDeviceId)!.y}
+            r="6"
+            fill="hsl(var(--primary))"
+            fillOpacity="1"
+          />
+        )}
+      </svg>
+    );
+  };
+
   // Detail panel for selected device
   const DetailPanel = () => {
     if (!selectedDevice) return null;
@@ -184,7 +302,7 @@ export default function TopologyPage() {
     return (
       <div 
         data-detail-panel
-        className="absolute right-0 top-0 h-full w-80 bg-card border-l border-border shadow-lg z-10 animate-in slide-in-from-right duration-200"
+        className="absolute right-0 top-0 h-full w-80 bg-card border-l border-border shadow-lg z-20 animate-in slide-in-from-right duration-200"
       >
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h3 className="font-semibold">Device Details</h3>
@@ -343,8 +461,9 @@ export default function TopologyPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="flex flex-col items-center gap-8 py-8">
+              <CardContent className="relative" ref={containerRef}>
+                <ConnectionLines />
+                <div className="flex flex-col items-center gap-8 py-8 relative">
                   <div className="flex flex-col items-center gap-2">
                     <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Core Layer ({coreDevices.length})
@@ -398,9 +517,11 @@ export default function TopologyPage() {
                         return (
                           <div
                             key={device.id}
+                            ref={(el) => registerNodeRef(device.id, el)}
                             data-device-node
+                            data-device-id={device.id}
                             className={cn(
-                              "h-6 w-6 rounded-sm cursor-pointer transition-all duration-200",
+                              "h-6 w-6 rounded-sm cursor-pointer transition-all duration-200 relative z-10",
                               statusColors[device.status],
                               dimmed ? "opacity-30" : "opacity-100",
                               isHovered && "ring-2 ring-primary ring-offset-1 scale-125",
@@ -408,7 +529,10 @@ export default function TopologyPage() {
                               highlighted && !isHovered && "scale-110"
                             )}
                             title={device.name}
-                            onMouseEnter={() => setHoveredDeviceId(device.id)}
+                            onMouseEnter={() => {
+                              setHoveredDeviceId(device.id);
+                              setTimeout(updateNodePositions, 0);
+                            }}
                             onMouseLeave={() => setHoveredDeviceId(null)}
                             onClick={(e) => {
                               e.stopPropagation();
