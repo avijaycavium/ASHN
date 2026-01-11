@@ -1,4 +1,4 @@
-import { storage } from "./storage";
+import { databaseStorage } from "./database-storage";
 import { detectAnomalies, getAllMetrics, updateMetricsCache } from "./prometheus-integration";
 import type { Incident, IncidentSeverity, IncidentStatus } from "@shared/schema";
 
@@ -73,7 +73,7 @@ class DetectionAgent {
 
   private async runDetectionCycle(): Promise<void> {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       updateMetricsCache(devices, true);
       
       const anomalies = detectAnomalies();
@@ -154,10 +154,9 @@ class DetectionAgent {
   }
 
   private async raiseIncident(creation: IncidentCreation): Promise<Incident> {
-    this.incidentCounter++;
-    const id = `INC-${String(this.incidentCounter).padStart(5, "0")}`;
+    const id = await databaseStorage.getNextIncidentId();
     
-    const incident: Incident = {
+    const incident = await databaseStorage.createIncident({
       id,
       title: creation.title,
       description: creation.description,
@@ -169,12 +168,7 @@ class DetectionAgent {
       affectedDevices: creation.affectedDevices,
       rootCause: null,
       confidence: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      resolvedAt: null,
-    };
-
-    await storage.addIncident(incident);
+    });
     
     this.notifyAgents(incident);
     

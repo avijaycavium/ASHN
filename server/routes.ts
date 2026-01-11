@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { databaseStorage } from "./database-storage";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 import { getCopilot } from "./copilot";
 import { orchestrator } from "./orchestrator";
@@ -26,9 +27,12 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  await databaseStorage.initialize();
+  console.log("[Routes] Database initialized");
+  
   app.get("/api/devices", async (req, res) => {
     try {
-      const devices = await storage.getDevices();
+      const devices = await databaseStorage.getDevices();
       res.json(devices);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch devices" });
@@ -37,7 +41,7 @@ export async function registerRoutes(
 
   app.get("/api/devices/:id", async (req, res) => {
     try {
-      const device = await storage.getDevice(req.params.id);
+      const device = await databaseStorage.getDevice(req.params.id);
       if (!device) {
         return res.status(404).json({ error: "Device not found" });
       }
@@ -97,7 +101,7 @@ export async function registerRoutes(
 
   app.get("/api/incidents", async (req, res) => {
     try {
-      const incidents = await storage.getIncidents();
+      const incidents = await databaseStorage.getIncidents();
       res.json(incidents);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch incidents" });
@@ -106,7 +110,7 @@ export async function registerRoutes(
 
   app.get("/api/incidents/:id", async (req, res) => {
     try {
-      const incident = await storage.getIncident(req.params.id);
+      const incident = await databaseStorage.getIncident(req.params.id);
       if (!incident) {
         return res.status(404).json({ error: "Incident not found" });
       }
@@ -118,7 +122,7 @@ export async function registerRoutes(
 
   app.get("/api/incidents/:id/timeline", async (req, res) => {
     try {
-      const timeline = await storage.getIncidentTimeline(req.params.id);
+      const timeline = await databaseStorage.getIncidentTimeline(req.params.id);
       res.json(timeline);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch incident timeline" });
@@ -127,7 +131,7 @@ export async function registerRoutes(
 
   app.get("/api/incidents/:id/remediation", async (req, res) => {
     try {
-      const steps = await storage.getIncidentRemediation(req.params.id);
+      const steps = await databaseStorage.getIncidentRemediation(req.params.id);
       res.json(steps);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch remediation steps" });
@@ -136,7 +140,7 @@ export async function registerRoutes(
 
   app.get("/api/agents", async (req, res) => {
     try {
-      const agents = await storage.getAgents();
+      const agents = await databaseStorage.getAgents();
       res.json(agents);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch agents" });
@@ -145,7 +149,7 @@ export async function registerRoutes(
 
   app.get("/api/agents/:id", async (req, res) => {
     try {
-      const agent = await storage.getAgent(req.params.id);
+      const agent = await databaseStorage.getAgent(req.params.id);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }
@@ -202,7 +206,7 @@ export async function registerRoutes(
 
   app.get("/api/topology/links", async (req, res) => {
     try {
-      const links = await storage.getTopologyLinks();
+      const links = await databaseStorage.getTopologyLinks();
       res.json(links);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch topology links" });
@@ -530,7 +534,7 @@ export async function registerRoutes(
   app.post("/api/orchestrator/trigger-analysis", async (req, res) => {
     try {
       const { incidentId } = req.body;
-      const incident = await storage.getIncident(incidentId);
+      const incident = await databaseStorage.getIncident(incidentId);
       if (!incident) {
         return res.status(404).json({ error: "Incident not found" });
       }
