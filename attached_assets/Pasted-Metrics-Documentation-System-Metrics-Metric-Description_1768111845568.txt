@@ -1,0 +1,107 @@
+Metrics Documentation
+System Metrics
+Metric	Description	Type	Labels
+switch_cpu_usage	CPU usage percentage per core	gauge	device, cpu_core
+switch_memory_used	Memory used in bytes	gauge	device
+switch_memory_available	Available memory in bytes	gauge	device
+switch_memory_utilization	Memory utilization percentage	gauge	device
+switch_temperature	Temperature in Celsius	gauge	device, sensor
+switch_power_consumption	Power consumption in watts	gauge	device, psu
+switch_fan_speed	Fan speed in RPM	gauge	device, fan
+Port Metrics
+Metric	Description	Type	Labels
+switch_port_bytes_in	Bytes received	counter	device, port, type
+switch_port_bytes_out	Bytes transmitted	counter	device, port, type
+switch_port_packets_in	Packets received	counter	device, port, type
+switch_port_packets_out	Packets transmitted	counter	device, port, type
+switch_port_unicast_packets_in	Unicast packets received	counter	device, port, type
+switch_port_multicast_packets_in	Multicast packets received	counter	device, port, type
+switch_port_broadcast_packets_in	Broadcast packets received	counter	device, port, type
+switch_port_errors_in	Input errors	counter	device, port, type
+switch_port_errors_out	Output errors	counter	device, port, type
+switch_port_discards_in	Input discards	counter	device, port, type
+switch_port_discards_out	Output discards	counter	device, port, type
+switch_port_oper_status	Operational status (1=up, 0=down)	gauge	device, port, type
+switch_port_admin_status	Administrative status (1=up, 0=down)	gauge	device, port, type
+switch_port_speed	Port speed in Mbps	gauge	device, port, type
+switch_port_mtu	MTU size in bytes	gauge	device, port, type
+switch_port_duplex	Duplex mode (1=full, 0=half)	gauge	device, port, type
+SAI Layer Metrics
+Collection Details:
+
+Source: SAI-Redis (Redis database 4) and COUNTERS_DB (Redis database 2)
+Frequency: Every 10 seconds (real-time collection)
+Purpose: ASIC-level telemetry data for link failure detection, congestion monitoring, and hardware-level visibility
+Data Format: Prometheus text format
+Port Statistics (SAI Level):
+
+Metric	Description	Type	Labels
+sai_port_oper_status	Port operational status (1=up, 0=down) - For link failure detection	gauge	device, port
+sai_port_rx_packets_total	Total packets received on port (SAI level)	counter	device, port
+sai_port_tx_packets_total	Total packets transmitted on port (SAI level)	counter	device, port
+sai_port_rx_bytes_total	Total bytes received on port (SAI level)	counter	device, port
+sai_port_tx_bytes_total	Total bytes transmitted on port (SAI level)	counter	device, port
+sai_port_rx_errors_total	Total receive errors on port (SAI level) - For congestion detection	counter	device, port
+sai_port_tx_errors_total	Total transmit errors on port (SAI level) - For congestion detection	counter	device, port
+sai_port_rx_discards_total	Total receive discards on port (SAI level) - For congestion detection	counter	device, port
+sai_port_tx_discards_total	Total transmit discards on port (SAI level) - For congestion detection	counter	device, port
+Queue Statistics (SAI Level):
+
+Metric	Description	Type	Labels
+sai_queue_depth_current	Current queue depth in bytes (SAI level) - For congestion detection	gauge	device, port, queue, type
+sai_queue_drops_total	Total queue drops (SAI level) - For congestion detection	counter	device, port, queue, type
+sai_queue_watermark_max	Maximum queue watermark in bytes (SAI level) - For congestion detection	gauge	device, port, queue, type
+Priority Group Statistics (SAI Level):
+
+Metric	Description	Type	Labels
+sai_pg_packets_total	Total packets in priority group (SAI level)	counter	device, port, pg
+sai_pg_bytes_total	Total bytes in priority group (SAI level)	counter	device, port, pg
+sai_pg_drops_total	Total priority group drops (SAI level) - For congestion detection	counter	device, port, pg
+sai_pg_watermark_bytes	Priority group watermark bytes (SAI level) - For congestion detection	gauge	device, port, pg
+ACL Statistics (SAI Level):
+
+Metric	Description	Type	Labels
+sai_acl_rule_hits_total	Total ACL rule hits (SAI level)	counter	device, acl
+sai_acl_rule_misses_total	Total ACL rule misses (SAI level)	counter	device, acl
+Buffer Pool Statistics (SAI Level):
+
+Metric	Description	Type	Labels
+sai_buffer_pool_used_bytes	Buffer pool used bytes (SAI level)	gauge	device, pool
+sai_buffer_pool_available_bytes	Buffer pool available bytes (SAI level)	gauge	device, pool
+sai_buffer_pool_watermark_bytes	Buffer pool watermark bytes (SAI level)	gauge	device, pool
+System and Status Metrics:
+
+Metric	Description	Type	Labels
+sai_api_modules_available	Number of available SAI API modules	gauge	device
+sai_collection_error	SAI metrics collection error (1=error, 0=ok)	gauge	device
+sai_ports_collected	Number of ports for which metrics were collected	gauge	device
+Note: SAI metrics are collected from SAI-Redis (Redis database 4) and COUNTERS_DB (Redis database 2) every 10 seconds in real-time. These metrics provide ASIC-level telemetry data and complement the port-level metrics by providing deeper visibility into the switch hardware. The metrics are optimized for link failure detection and congestion monitoring use cases.
+
+BGP Metrics
+Metric	Description	Type	Labels
+switch_bgp_peer_state	Peer state (1=Established, 0=Other)	gauge	device, peer_ip, vrf
+switch_bgp_prefixes_received	Prefixes received from peer	gauge	device, peer_ip, vrf
+switch_bgp_prefixes_advertised	Prefixes advertised to peer	gauge	device, peer_ip, vrf
+switch_bgp_updates_received	BGP updates received	counter	device, peer_ip, vrf
+switch_bgp_updates_sent	BGP updates sent	counter	device, peer_ip, vrf
+LLDP Metrics
+Metric	Description	Type	Labels
+switch_lldp_neighbor_count	Total LLDP neighbors	gauge	device
+switch_lldp_neighbor_age	Neighbor age in seconds	gauge	device, local_port, neighbor_chassis_id
+Redis Metrics
+Metric	Description	Type	Labels
+redis_commands_total	Total commands processed	counter	-
+redis_connections_total	Total connections received	counter	-
+redis_ops_per_sec	Operations per second	gauge	-
+redis_input_kbps	Input bandwidth (kbps)	gauge	-
+redis_output_kbps	Output bandwidth (kbps)	gauge	-
+redis_memory_used	Memory used in bytes	gauge	-
+redis_connected_clients	Connected clients	gauge	-
+Docker Metrics
+Metric	Description	Type	Labels
+docker_container_cpu_percent	Container CPU usage (%)	gauge	container
+docker_container_memory_bytes	Container memory usage (bytes)	gauge	container
+GNMI Metrics
+Metric	Description	Type	Labels
+gnmi_service_up	GNMI service availability	gauge	device
+gnmi_collection_timestamp	Last collection timestamp	gauge	device

@@ -161,11 +161,11 @@ function generateMockDevices(): Device[] {
     },
   });
   
-  // DPU-1 (Ubuntu, Data plane endpoint)
+  // ENDPOINT-001 (Data plane endpoint)
   devices.push({
-    id: "dpu-1",
-    name: "DPU-1",
-    type: "dpu",
+    id: "endpoint-001",
+    name: "ENDPOINT-001",
+    type: "endpoint",
     status: "healthy",
     location: "Data Plane",
     cpu: 22,
@@ -175,15 +175,17 @@ function generateMockDevices(): Device[] {
     ports: 2,
     activePorts: 2,
     role: "endpoint",
-    mgmtIp: "192.168.100.31",
-    dataIp: "10.0.1.10",
+    tier: "endpoint",
+    mgmtIp: "192.168.100.200",
+    dataIp: "10.2.1.10",
+    telemetryExporter: { enabled: true, port: 9100, scrapeInterval: 10, metricsPath: "/metrics" },
   });
   
-  // DPU-2 (Ubuntu, Data plane endpoint)
+  // ENDPOINT-002 (Data plane endpoint)
   devices.push({
-    id: "dpu-2",
-    name: "DPU-2",
-    type: "dpu",
+    id: "endpoint-002",
+    name: "ENDPOINT-002",
+    type: "endpoint",
     status: "healthy",
     location: "Data Plane",
     cpu: 18,
@@ -193,8 +195,10 @@ function generateMockDevices(): Device[] {
     ports: 2,
     activePorts: 2,
     role: "endpoint",
-    mgmtIp: "192.168.100.32",
-    dataIp: "10.0.4.10",
+    tier: "endpoint",
+    mgmtIp: "192.168.100.201",
+    dataIp: "10.2.2.10",
+    telemetryExporter: { enabled: true, port: 9100, scrapeInterval: 10, metricsPath: "/metrics" },
   });
   
   return devices;
@@ -213,7 +217,7 @@ function generateIncidents(): Incident[] {
       ttd: 25,
       ttr: 55,
       tttr: null,
-      affectedDevices: ["switch-a1", "switch-c", "dpu-1", "dpu-2"],
+      affectedDevices: ["switch-a1", "switch-c", "endpoint-001", "endpoint-002"],
       rootCause: "Link flap detected on Switch-A1:port2 (10.0.13.1/30). Evidence: 6 port state changes in 2min, BGP updates spike (5+ resets), CRC/FCS errors detected. Suspected transceiver degradation or cable connector issue. Primary path DPU-1 → A1 → C → DPU-2 affected. Backup path via Switch-B (10.0.12.0/30) available.",
       confidence: 95,
       createdAt: new Date(now.getTime() - 5 * 60000).toISOString(),

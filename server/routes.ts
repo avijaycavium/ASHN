@@ -4,6 +4,21 @@ import { storage } from "./storage";
 import { getGNS3Client, getGNS3Config, resetGNS3Client } from "./gns3";
 import { getCopilot } from "./copilot";
 import { orchestrator } from "./orchestrator";
+import { 
+  updateMetricsCache, 
+  getAllMetrics, 
+  getDeviceMetrics, 
+  queryMetricsByName,
+  getSystemMetricsSummary,
+  getBGPPeerStatus,
+  getPortStatus,
+  executePromQLQuery,
+  detectAnomalies,
+  getPrometheusConfig,
+  updatePrometheusConfig
+} from "./prometheus-integration";
+import { injectFault, clearFault, hasFault, getFault, formatPrometheusMetrics, generateAllDeviceMetrics } from "./telemetry-exporter";
+import { generate52DeviceTopology } from "./topology-generator";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -535,6 +550,211 @@ export async function registerRoutes(
         error: "Failed to reset demo",
         details: error instanceof Error ? error.message : "Unknown error",
       });
+    }
+  });
+
+  // Metrics API endpoints
+  app.get("/api/metrics/refresh", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      res.json({ success: true, message: "Metrics cache refreshed", deviceCount: devices.length });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to refresh metrics" });
+    }
+  });
+
+  app.get("/api/metrics/all", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const metrics = getAllMetrics();
+      res.json(metrics);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get metrics" });
+    }
+  });
+
+  app.get("/api/metrics/device/:deviceId", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const metrics = getDeviceMetrics(req.params.deviceId);
+      if (!metrics) {
+        return res.status(404).json({ error: "Device metrics not found" });
+      }
+      res.json(metrics);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get device metrics" });
+    }
+  });
+
+  app.get("/api/metrics/system", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const summary = getSystemMetricsSummary();
+      res.json(summary);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get system metrics" });
+    }
+  });
+
+  app.get("/api/metrics/bgp", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const bgpStatus = getBGPPeerStatus();
+      res.json(bgpStatus);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get BGP metrics" });
+    }
+  });
+
+  app.get("/api/metrics/ports", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const portStatus = getPortStatus();
+      res.json(portStatus);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get port metrics" });
+    }
+  });
+
+  app.post("/api/metrics/query", async (req, res) => {
+    try {
+      const { query } = req.body;
+      if (!query) {
+        return res.status(400).json({ error: "Query is required" });
+      }
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const result = await executePromQLQuery(query);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to execute query" });
+    }
+  });
+
+  app.get("/api/metrics/anomalies", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      updateMetricsCache(devices);
+      const anomalies = detectAnomalies();
+      res.json(anomalies);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to detect anomalies" });
+    }
+  });
+
+  app.get("/api/metrics/prometheus", async (req, res) => {
+    try {
+      const devices = await storage.getDevices();
+      const allMetrics = generateAllDeviceMetrics(devices);
+      const prometheusFormat = formatPrometheusMetrics(allMetrics);
+      res.set("Content-Type", "text/plain");
+      res.send(prometheusFormat);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get prometheus metrics" });
+    }
+  });
+
+  app.get("/api/prometheus/config", async (req, res) => {
+    try {
+      const config = getPrometheusConfig();
+      res.json(config);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get Prometheus config" });
+    }
+  });
+
+  app.post("/api/prometheus/config", async (req, res) => {
+    try {
+      const { url, enabled } = req.body;
+      updatePrometheusConfig({ url, enabled });
+      res.json({ success: true, config: getPrometheusConfig() });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update Prometheus config" });
+    }
+  });
+
+  // Fault injection API endpoints
+  app.post("/api/faults/inject", async (req, res) => {
+    try {
+      const { deviceId, faultType, severity, duration } = req.body;
+      if (!deviceId || !faultType) {
+        return res.status(400).json({ error: "deviceId and faultType are required" });
+      }
+      injectFault(deviceId, faultType, severity || "medium");
+      
+      if (duration) {
+        setTimeout(() => clearFault(deviceId), duration * 1000);
+      }
+      
+      res.json({ 
+        success: true, 
+        message: `Fault ${faultType} injected on ${deviceId}`,
+        fault: { deviceId, faultType, severity: severity || "medium", duration }
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to inject fault" });
+    }
+  });
+
+  app.post("/api/faults/reset", async (req, res) => {
+    try {
+      const { deviceId } = req.body;
+      if (!deviceId) {
+        return res.status(400).json({ error: "deviceId is required" });
+      }
+      clearFault(deviceId);
+      res.json({ success: true, message: `Fault cleared on ${deviceId}` });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to reset fault" });
+    }
+  });
+
+  app.get("/api/faults/status/:deviceId", async (req, res) => {
+    try {
+      const deviceId = req.params.deviceId;
+      const fault = getFault(deviceId);
+      res.json({ 
+        deviceId, 
+        hasFault: hasFault(deviceId), 
+        fault: fault || null 
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get fault status" });
+    }
+  });
+
+  // Topology API endpoints
+  app.get("/api/topology/generate", async (req, res) => {
+    try {
+      const topology = generate52DeviceTopology();
+      res.json({
+        devices: topology.devices.length,
+        links: topology.links.length,
+        tiers: {
+          core: topology.devices.filter(d => d.tier === "core").length,
+          spine: topology.devices.filter(d => d.tier === "spine").length,
+          tor: topology.devices.filter(d => d.tier === "tor").length,
+          endpoint: topology.devices.filter(d => d.tier === "endpoint").length,
+          management: topology.devices.filter(d => d.tier === "management").length,
+        }
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to generate topology" });
+    }
+  });
+
+  app.get("/api/topology/pyramid", async (req, res) => {
+    try {
+      const topology = generate52DeviceTopology();
+      res.json(topology);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get pyramid topology" });
     }
   });
 
