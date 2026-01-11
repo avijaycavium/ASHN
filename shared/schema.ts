@@ -15,6 +15,18 @@ export type User = typeof users.$inferSelect;
 
 export type DeviceType = "core" | "spine" | "tor" | "dpu";
 export type DeviceStatus = "healthy" | "degraded" | "critical" | "offline";
+export type DeviceRole = "management" | "fabric" | "endpoint" | "transit";
+
+export interface BGPConfig {
+  asn: number;
+  routerId: string;
+  neighbors: Array<{
+    peerIp: string;
+    remoteAsn: number;
+    weight: number;
+    timers: { keepalive: number; hold: number };
+  }>;
+}
 
 export interface Device {
   id: string;
@@ -28,6 +40,10 @@ export interface Device {
   ipAddress: string;
   ports: number;
   activePorts: number;
+  role?: DeviceRole;
+  bgpConfig?: BGPConfig;
+  mgmtIp?: string;
+  dataIp?: string;
 }
 
 export type IncidentSeverity = "critical" | "high" | "medium" | "low";

@@ -62,6 +62,8 @@ function generateMockDevices(): Device[] {
     ipAddress: "192.168.100.1",
     ports: 4,
     activePorts: 2,
+    role: "management",
+    mgmtIp: "192.168.100.1",
   });
   
   // MGMT-SW (L2 Ethernet Switch)
@@ -77,6 +79,8 @@ function generateMockDevices(): Device[] {
     ipAddress: "192.168.100.254",
     ports: 8,
     activePorts: 6,
+    role: "management",
+    mgmtIp: "192.168.100.254",
   });
   
   // Switch-A1 (AS 65101, DPU-1 facing) - PRIMARY FLAP TEST SWITCH
@@ -92,6 +96,17 @@ function generateMockDevices(): Device[] {
     ipAddress: "192.168.100.21",
     ports: 4,
     activePorts: 3,
+    role: "fabric",
+    mgmtIp: "192.168.100.21",
+    dataIp: "10.0.1.1",
+    bgpConfig: {
+      asn: 65101,
+      routerId: "10.0.1.1",
+      neighbors: [
+        { peerIp: "10.0.13.2", remoteAsn: 65103, weight: 200, timers: { keepalive: 5, hold: 15 } },
+        { peerIp: "10.0.12.2", remoteAsn: 65102, weight: 100, timers: { keepalive: 5, hold: 15 } },
+      ],
+    },
   });
   
   // Switch-B (AS 65102, Transit/Spine)
@@ -107,6 +122,17 @@ function generateMockDevices(): Device[] {
     ipAddress: "192.168.100.22",
     ports: 4,
     activePorts: 3,
+    role: "transit",
+    mgmtIp: "192.168.100.22",
+    dataIp: "10.0.12.2",
+    bgpConfig: {
+      asn: 65102,
+      routerId: "10.0.12.2",
+      neighbors: [
+        { peerIp: "10.0.12.1", remoteAsn: 65101, weight: 100, timers: { keepalive: 5, hold: 15 } },
+        { peerIp: "10.0.23.2", remoteAsn: 65103, weight: 100, timers: { keepalive: 5, hold: 15 } },
+      ],
+    },
   });
   
   // Switch-C (AS 65103, DPU-2 facing)
@@ -122,6 +148,17 @@ function generateMockDevices(): Device[] {
     ipAddress: "192.168.100.23",
     ports: 4,
     activePorts: 4,
+    role: "fabric",
+    mgmtIp: "192.168.100.23",
+    dataIp: "10.0.4.1",
+    bgpConfig: {
+      asn: 65103,
+      routerId: "10.0.4.1",
+      neighbors: [
+        { peerIp: "10.0.13.1", remoteAsn: 65101, weight: 200, timers: { keepalive: 5, hold: 15 } },
+        { peerIp: "10.0.23.1", remoteAsn: 65102, weight: 100, timers: { keepalive: 5, hold: 15 } },
+      ],
+    },
   });
   
   // DPU-1 (Ubuntu, Data plane endpoint)
@@ -137,6 +174,9 @@ function generateMockDevices(): Device[] {
     ipAddress: "10.0.1.10",
     ports: 2,
     activePorts: 2,
+    role: "endpoint",
+    mgmtIp: "192.168.100.31",
+    dataIp: "10.0.1.10",
   });
   
   // DPU-2 (Ubuntu, Data plane endpoint)
@@ -152,6 +192,9 @@ function generateMockDevices(): Device[] {
     ipAddress: "10.0.4.10",
     ports: 2,
     activePorts: 2,
+    role: "endpoint",
+    mgmtIp: "192.168.100.32",
+    dataIp: "10.0.4.10",
   });
   
   return devices;
