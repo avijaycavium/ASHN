@@ -1054,6 +1054,144 @@ export async function registerRoutes(
     }
   });
 
+  // Get LangGraph agent registry - source of truth for agent definitions
+  app.get("/api/langgraph/agents", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/registry`,
+        { method: "GET" },
+        5000
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const registry = await response.json();
+      res.json({ connected: true, ...registry });
+    } catch (error) {
+      // Return static agent registry if server is unavailable
+      res.json({
+        connected: false,
+        agents: [
+          {
+            id: "langgraph-detection",
+            name: "DetectionAgent",
+            type: "detection",
+            status: "offline",
+            description: "Analyzes metrics and confirms/classifies network faults using AI-powered pattern recognition",
+            capabilities: [
+              { name: "anomaly_detection", description: "Detect metric anomalies using statistical analysis" },
+              { name: "fault_classification", description: "Classify faults into specific types" }
+            ],
+            tools: ["prometheus", "gns3"],
+            usesAI: true,
+            framework: "langgraph"
+          },
+          {
+            id: "langgraph-rca",
+            name: "RCAAgent",
+            type: "rca",
+            status: "offline",
+            description: "Performs root cause analysis using correlation analysis and AI hypothesis generation",
+            capabilities: [
+              { name: "correlation_analysis", description: "Correlate events across devices" },
+              { name: "hypothesis_generation", description: "Generate root cause hypotheses" }
+            ],
+            tools: ["prometheus", "gns3"],
+            usesAI: true,
+            framework: "langgraph"
+          },
+          {
+            id: "langgraph-remediation",
+            name: "RemediationAgent",
+            type: "remediation",
+            status: "offline",
+            description: "Executes corrective actions via SONiC and GNS3 based on playbooks",
+            capabilities: [
+              { name: "playbook_execution", description: "Execute remediation playbooks" },
+              { name: "bgp_remediation", description: "Reset BGP sessions and clear routes" }
+            ],
+            tools: ["sonic", "gns3"],
+            usesAI: false,
+            framework: "langgraph"
+          },
+          {
+            id: "langgraph-verification",
+            name: "VerificationAgent",
+            type: "verification",
+            status: "offline",
+            description: "Validates fix success by checking metrics and running verification queries",
+            capabilities: [
+              { name: "metric_verification", description: "Verify metrics return to normal levels" }
+            ],
+            tools: ["prometheus"],
+            usesAI: false,
+            framework: "langgraph"
+          }
+        ],
+        totalAgents: 4,
+        activeWorkflows: 0,
+        framework: "langgraph",
+        note: "Agent server not connected"
+      });
+    }
+  });
+
+  // Get MCP tools health status
+  app.get("/api/tools/health", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/tools/health`,
+        { method: "GET" },
+        5000
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const health = await response.json();
+      res.json({ connected: true, ...health });
+    } catch (error) {
+      // Return offline status if server is unavailable
+      res.json({
+        connected: false,
+        tools: [
+          {
+            id: "gns3",
+            name: "GNS3 Network Simulator",
+            description: "Network topology simulation and node control",
+            status: "disconnected",
+            message: "Agent server not available",
+            enabled: false,
+            capabilities: ["Node lifecycle management", "Link control", "Topology visualization"]
+          },
+          {
+            id: "prometheus",
+            name: "Prometheus Metrics",
+            description: "Time-series metrics collection and queries",
+            status: "disconnected",
+            message: "Agent server not available",
+            enabled: false,
+            capabilities: ["Real-time metric queries", "Threshold monitoring"]
+          },
+          {
+            id: "sonic",
+            name: "SONiC Network OS",
+            description: "Network operating system for remediation actions",
+            status: "disconnected",
+            message: "Agent server not available",
+            enabled: false,
+            capabilities: ["BGP session management", "Interface control"]
+          }
+        ],
+        summary: {
+          total: 3,
+          connected: 0,
+          simulated: 0,
+          disconnected: 3
+        }
+      });
+    }
+  });
+
   app.get("/api/langgraph/workflow/:incidentId", async (req, res) => {
     try {
       const response = await fetchWithTimeout(

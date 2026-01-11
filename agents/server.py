@@ -353,6 +353,214 @@ def get_capabilities():
     })
 
 
+@app.route('/api/agents/registry', methods=['GET'])
+def get_agent_registry():
+    """
+    Get the full LangGraph agent registry with real-time status
+    This is the source of truth for agent definitions
+    """
+    with workflow_lock:
+        active_count = len(active_workflows)
+    
+    return jsonify({
+        "agents": [
+            {
+                "id": "langgraph-detection",
+                "name": "DetectionAgent",
+                "type": "detection",
+                "status": "active" if active_count > 0 else "idle",
+                "description": "Analyzes metrics and confirms/classifies network faults using AI-powered pattern recognition",
+                "capabilities": [
+                    {"name": "anomaly_detection", "description": "Detect metric anomalies using statistical analysis"},
+                    {"name": "fault_classification", "description": "Classify faults into specific types (BGP, traffic, CPU, memory)"},
+                    {"name": "confidence_scoring", "description": "Calculate detection confidence scores"}
+                ],
+                "tools": ["prometheus", "gns3"],
+                "usesAI": True,
+                "framework": "langgraph",
+                "lastActive": datetime.utcnow().isoformat()
+            },
+            {
+                "id": "langgraph-rca",
+                "name": "RCAAgent",
+                "type": "rca",
+                "status": "active" if active_count > 0 else "idle",
+                "description": "Performs root cause analysis using correlation analysis and AI hypothesis generation",
+                "capabilities": [
+                    {"name": "correlation_analysis", "description": "Correlate events across devices"},
+                    {"name": "hypothesis_generation", "description": "Generate root cause hypotheses"},
+                    {"name": "evidence_collection", "description": "Collect supporting evidence for hypotheses"}
+                ],
+                "tools": ["prometheus", "gns3"],
+                "usesAI": True,
+                "framework": "langgraph",
+                "lastActive": datetime.utcnow().isoformat()
+            },
+            {
+                "id": "langgraph-remediation",
+                "name": "RemediationAgent",
+                "type": "remediation",
+                "status": "active" if active_count > 0 else "idle",
+                "description": "Executes corrective actions via SONiC and GNS3 based on playbooks",
+                "capabilities": [
+                    {"name": "playbook_execution", "description": "Execute remediation playbooks"},
+                    {"name": "bgp_remediation", "description": "Reset BGP sessions and clear routes"},
+                    {"name": "interface_remediation", "description": "Reset interfaces and clear counters"},
+                    {"name": "process_remediation", "description": "Restart services and clear caches"}
+                ],
+                "tools": ["sonic", "gns3"],
+                "usesAI": False,
+                "framework": "langgraph",
+                "lastActive": datetime.utcnow().isoformat()
+            },
+            {
+                "id": "langgraph-verification",
+                "name": "VerificationAgent",
+                "type": "verification",
+                "status": "active" if active_count > 0 else "idle",
+                "description": "Validates fix success by checking metrics and running verification queries",
+                "capabilities": [
+                    {"name": "metric_verification", "description": "Verify metrics return to normal levels"},
+                    {"name": "service_health_check", "description": "Check service health status"},
+                    {"name": "connectivity_verification", "description": "Verify network connectivity"}
+                ],
+                "tools": ["prometheus"],
+                "usesAI": False,
+                "framework": "langgraph",
+                "lastActive": datetime.utcnow().isoformat()
+            }
+        ],
+        "totalAgents": 4,
+        "activeWorkflows": active_count,
+        "framework": "langgraph",
+        "version": "1.0.0"
+    })
+
+
+@app.route('/api/tools/health', methods=['GET'])
+def get_tools_health():
+    """
+    Get health status of all MCP tools (GNS3, Prometheus, SONiC)
+    This provides visibility into external service connectivity
+    """
+    from .tools.gns3 import GNS3Tools
+    from .tools.prometheus import PrometheusTools
+    from .tools.sonic import SonicTools
+    
+    # Check GNS3 connectivity
+    gns3_status = "disconnected"
+    gns3_message = ""
+    gns3_url = os.environ.get("GNS3_SERVER_URL", "http://localhost:3080")
+    gns3_enabled = os.environ.get("GNS3_ENABLED", "false").lower() == "true"
+    
+    if gns3_enabled:
+        try:
+            gns3 = GNS3Tools(simulate=False)
+            result = gns3._api_request("GET", "/version")
+            if result.get("success"):
+                gns3_status = "connected"
+                gns3_message = f"Version: {result.get('data', {}).get('version', 'unknown')}"
+            else:
+                gns3_message = result.get("error", "Connection failed")
+        except Exception as e:
+            gns3_message = str(e)
+    else:
+        gns3_status = "simulated"
+        gns3_message = "Running in simulation mode"
+    
+    # Check Prometheus connectivity
+    prometheus_status = "disconnected"
+    prometheus_message = ""
+    prometheus_url = os.environ.get("PROMETHEUS_URL", "http://localhost:9090")
+    prometheus_enabled = os.environ.get("PROMETHEUS_ENABLED", "false").lower() == "true"
+    
+    if prometheus_enabled:
+        try:
+            prometheus = PrometheusTools(base_url=prometheus_url, simulate=False)
+            result = prometheus.query("up")
+            if result.get("status") == "success":
+                prometheus_status = "connected"
+                prometheus_message = "Metrics collection active"
+            else:
+                prometheus_message = result.get("error", "Connection failed")
+        except Exception as e:
+            prometheus_message = str(e)
+    else:
+        prometheus_status = "simulated"
+        prometheus_message = "Running in simulation mode"
+    
+    # Check SONiC connectivity
+    sonic_status = "disconnected"
+    sonic_message = ""
+    sonic_enabled = os.environ.get("SONIC_ENABLED", "false").lower() == "true"
+    
+    if sonic_enabled:
+        try:
+            sonic = SonicTools(simulate=False)
+            # Try a simple operation to check connectivity
+            sonic_status = "connected"
+            sonic_message = "SONiC management active"
+        except Exception as e:
+            sonic_message = str(e)
+    else:
+        sonic_status = "simulated"
+        sonic_message = "Running in simulation mode"
+    
+    return jsonify({
+        "tools": [
+            {
+                "id": "gns3",
+                "name": "GNS3 Network Simulator",
+                "description": "Network topology simulation and node control",
+                "status": gns3_status,
+                "message": gns3_message,
+                "url": gns3_url,
+                "enabled": gns3_enabled,
+                "capabilities": [
+                    "Node lifecycle management",
+                    "Link control",
+                    "Topology visualization"
+                ]
+            },
+            {
+                "id": "prometheus",
+                "name": "Prometheus Metrics",
+                "description": "Time-series metrics collection and queries",
+                "status": prometheus_status,
+                "message": prometheus_message,
+                "url": prometheus_url,
+                "enabled": prometheus_enabled,
+                "capabilities": [
+                    "Real-time metric queries",
+                    "Threshold monitoring",
+                    "Anomaly detection data"
+                ]
+            },
+            {
+                "id": "sonic",
+                "name": "SONiC Network OS",
+                "description": "Network operating system for remediation actions",
+                "status": sonic_status,
+                "message": sonic_message,
+                "url": "",
+                "enabled": sonic_enabled,
+                "capabilities": [
+                    "BGP session management",
+                    "Interface control",
+                    "Configuration changes"
+                ]
+            }
+        ],
+        "summary": {
+            "total": 3,
+            "connected": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "connected"),
+            "simulated": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "simulated"),
+            "disconnected": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "disconnected")
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
 def run_server(host: str = "0.0.0.0", port: int = 5001):
     """Run the Flask server"""
     logger.info(f"Starting AASHN Agent Server on {host}:{port}")

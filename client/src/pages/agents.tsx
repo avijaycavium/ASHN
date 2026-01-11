@@ -23,7 +23,13 @@ import {
   MemoryStick,
   Network,
   Link2,
-  Eye
+  Eye,
+  Wrench,
+  Sparkles,
+  Brain,
+  Search,
+  Shield,
+  CheckSquare
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -100,6 +106,57 @@ interface AnomalyEvent {
   incidentId?: string;
 }
 
+// LangGraph Agent types (from Python agent framework)
+interface LangGraphAgentCapability {
+  name: string;
+  description: string;
+}
+
+interface LangGraphAgent {
+  id: string;
+  name: string;
+  type: string;
+  status: "active" | "idle" | "offline";
+  description: string;
+  capabilities: LangGraphAgentCapability[];
+  tools: string[];
+  usesAI: boolean;
+  framework: string;
+  lastActive?: string;
+}
+
+interface LangGraphAgentRegistry {
+  connected: boolean;
+  agents: LangGraphAgent[];
+  totalAgents: number;
+  activeWorkflows: number;
+  framework: string;
+  note?: string;
+}
+
+// MCP Tool types
+interface MCPTool {
+  id: string;
+  name: string;
+  description: string;
+  status: "connected" | "simulated" | "disconnected";
+  message: string;
+  url?: string;
+  enabled: boolean;
+  capabilities: string[];
+}
+
+interface ToolsHealth {
+  connected: boolean;
+  tools: MCPTool[];
+  summary: {
+    total: number;
+    connected: number;
+    simulated: number;
+    disconnected: number;
+  };
+}
+
 function formatTimeAgo(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();
@@ -169,6 +226,18 @@ export default function AgentsPage() {
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
     refetchInterval: 10000,
+  });
+
+  // LangGraph agent registry from Python service
+  const { data: langGraphAgents, isLoading: langGraphLoading } = useQuery<LangGraphAgentRegistry>({
+    queryKey: ["/api/langgraph/agents"],
+    refetchInterval: 10000,
+  });
+
+  // MCP tools health status
+  const { data: toolsHealth, isLoading: toolsLoading } = useQuery<ToolsHealth>({
+    queryKey: ["/api/tools/health"],
+    refetchInterval: 15000,
   });
 
   // Initialize telemetry data from devices
@@ -435,6 +504,29 @@ export default function AgentsPage() {
               {anomalyStats.total > 0 && (
                 <Badge variant="destructive" className="ml-1">{anomalyStats.total}</Badge>
               )}
+            </TabsTrigger>
+            <TabsTrigger 
+              value="langgraph" 
+              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
+              data-testid="tab-langgraph"
+            >
+              <Brain className="h-4 w-4" />
+              LangGraph Agents
+              <Badge variant="outline" className="ml-1">{langGraphAgents?.totalAgents || 4}</Badge>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="tools" 
+              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
+              data-testid="tab-tools"
+            >
+              <Wrench className="h-4 w-4" />
+              MCP Tools
+              <Badge 
+                variant={toolsHealth?.summary?.connected ? "default" : "secondary"} 
+                className="ml-1"
+              >
+                {toolsHealth?.summary?.connected || 0}/{toolsHealth?.summary?.total || 3}
+              </Badge>
             </TabsTrigger>
           </TabsList>
         </div>
@@ -886,6 +978,238 @@ export default function AgentsPage() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        {/* LangGraph Agents Tab */}
+        <TabsContent value="langgraph" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Badge 
+                variant={langGraphAgents?.connected ? "default" : "secondary"}
+                className="gap-1"
+              >
+                <Radio className={cn("h-3 w-3", langGraphAgents?.connected && "animate-pulse")} />
+                {langGraphAgents?.connected ? "Connected" : "Disconnected"}
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                Framework: <span className="font-mono">{langGraphAgents?.framework || "langgraph"}</span>
+              </span>
+              {langGraphAgents?.activeWorkflows !== undefined && langGraphAgents.activeWorkflows > 0 && (
+                <Badge variant="outline" className="gap-1">
+                  <Activity className="h-3 w-3" />
+                  {langGraphAgents.activeWorkflows} Active Workflow{langGraphAgents.activeWorkflows !== 1 ? 's' : ''}
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          {langGraphLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-64" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {langGraphAgents?.agents?.map((agent) => {
+                const agentIcon = agent.type === "detection" ? <Search className="h-6 w-6" /> :
+                                 agent.type === "rca" ? <Brain className="h-6 w-6" /> :
+                                 agent.type === "remediation" ? <Shield className="h-6 w-6" /> :
+                                 <CheckSquare className="h-6 w-6" />;
+                const statusColor = agent.status === "active" ? "bg-status-online" :
+                                   agent.status === "idle" ? "bg-muted" : "bg-status-offline";
+                
+                return (
+                  <Card key={agent.id} className="hover-elevate" data-testid={`langgraph-agent-${agent.id}`}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={cn(
+                            "h-12 w-12 rounded-md flex items-center justify-center text-white",
+                            agent.status === "active" ? "bg-primary" : "bg-muted-foreground"
+                          )}>
+                            {agentIcon}
+                          </div>
+                          <div>
+                            <CardTitle className="text-base flex items-center gap-2">
+                              {agent.name}
+                              {agent.usesAI && (
+                                <Badge variant="outline" className="text-xs gap-1">
+                                  <Sparkles className="h-3 w-3" />
+                                  AI
+                                </Badge>
+                              )}
+                            </CardTitle>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {agent.framework} / {agent.type}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge 
+                          variant={agent.status === "active" ? "default" : "secondary"}
+                          className={cn("capitalize", agent.status === "offline" && "bg-status-offline")}
+                        >
+                          <span className={cn("h-2 w-2 rounded-full mr-1.5", statusColor)} />
+                          {agent.status}
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <p className="text-sm text-muted-foreground">
+                        {agent.description}
+                      </p>
+                      
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Capabilities</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {agent.capabilities.map((cap) => (
+                            <Badge key={cap.name} variant="outline" className="text-xs">
+                              {cap.name.replace(/_/g, ' ')}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Tools</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {agent.tools.map((tool) => (
+                            <Badge key={tool} variant="secondary" className="text-xs gap-1">
+                              <Wrench className="h-3 w-3" />
+                              {tool}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {!langGraphAgents?.connected && (
+            <Card className="border-dashed border-2 bg-muted/20">
+              <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+                <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
+                <p className="text-sm text-muted-foreground">
+                  Python agent server not connected
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {langGraphAgents?.note || "Start the agent server on port 5001 for live status"}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* MCP Tools Tab */}
+        <TabsContent value="tools" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <Badge 
+                variant={toolsHealth?.connected ? "default" : "secondary"}
+                className="gap-1"
+              >
+                <Radio className={cn("h-3 w-3", toolsHealth?.connected && "animate-pulse")} />
+                {toolsHealth?.connected ? "Agent Server Connected" : "Agent Server Disconnected"}
+              </Badge>
+              <span className="text-sm text-muted-foreground">
+                {toolsHealth?.summary?.connected || 0} of {toolsHealth?.summary?.total || 3} tools connected
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-online" />
+                  Connected
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-online">
+                  {toolsHealth?.summary?.connected || 0}
+                </span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-away" />
+                  Simulated
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-away">
+                  {toolsHealth?.summary?.simulated || 0}
+                </span>
+              </CardContent>
+            </Card>
+          </div>
+
+          {toolsLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-32" />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {toolsHealth?.tools?.map((tool) => {
+                const toolIcon = tool.id === "gns3" ? <Network className="h-6 w-6" /> :
+                                tool.id === "prometheus" ? <Activity className="h-6 w-6" /> :
+                                <Server className="h-6 w-6" />;
+                const statusColor = tool.status === "connected" ? "text-status-online" :
+                                   tool.status === "simulated" ? "text-status-away" : "text-status-offline";
+                const statusBg = tool.status === "connected" ? "bg-status-online/10" :
+                                tool.status === "simulated" ? "bg-status-away/10" : "bg-status-offline/10";
+                
+                return (
+                  <Card key={tool.id} className={cn("border-l-4", 
+                    tool.status === "connected" && "border-l-status-online",
+                    tool.status === "simulated" && "border-l-status-away",
+                    tool.status === "disconnected" && "border-l-status-offline"
+                  )} data-testid={`tool-${tool.id}`}>
+                    <CardContent className="py-4">
+                      <div className="flex items-start gap-4">
+                        <div className={cn("h-12 w-12 rounded-md flex items-center justify-center", statusBg, statusColor)}>
+                          {toolIcon}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <h3 className="font-medium">{tool.name}</h3>
+                              <Badge 
+                                variant={tool.status === "connected" ? "default" : "secondary"}
+                                className={cn("capitalize text-xs", statusColor)}
+                              >
+                                {tool.status}
+                              </Badge>
+                              {!tool.enabled && (
+                                <Badge variant="outline" className="text-xs">Disabled</Badge>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-sm text-muted-foreground mt-1">{tool.description}</p>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            <span className={statusColor}>{tool.message}</span>
+                            {tool.url && <span className="ml-2 font-mono">{tool.url}</span>}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 mt-3">
+                            {tool.capabilities.map((cap, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">{cap}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

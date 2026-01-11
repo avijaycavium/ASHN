@@ -39,12 +39,19 @@ A natural language interface for managing GNS3 network topologies through conver
 ### LangGraph Autonomous Agents
 AASHN implements a fully autonomous self-healing pipeline using LangGraph in Python. This system detects, diagnoses, remediates, and verifies network issues.
 The pipeline consists of:
-- **DetectionAgent**: Anomaly detection and fault classification.
-- **RCAAgent**: Root cause analysis.
+- **DetectionAgent**: Anomaly detection and fault classification (AI-powered).
+- **RCAAgent**: Root cause analysis (AI-powered).
 - **RemediationAgent**: Executes corrective actions (e.g., via SONiC/GNS3).
 - **VerificationAgent**: Validates fix success.
 
 Supported fault types include BGP link/session instability, traffic drops, CPU spikes, and memory exhaustion. The LangGraph workflow includes conditional routing for early exit on low confidence, retries on verification failure, and graceful fallback to rule-based logic if AI credentials are not configured. The Python agent server (Flask) runs on port 5001 and supports both synchronous and asynchronous workflow execution.
+
+### Agent-UI Synchronization
+The Agents page (`/agents`) includes dedicated tabs for viewing LangGraph agent status and MCP tool health:
+- **LangGraph Agents Tab**: Displays the 4 Python framework agents (DetectionAgent, RCAAgent, RemediationAgent, VerificationAgent) with AI badges, capabilities, and tool dependencies. Fetches from `/api/langgraph/agents` every 10 seconds.
+- **MCP Tools Tab**: Shows connection status for GNS3, Prometheus, and SONiC tools with capabilities lists. Fetches from `/api/tools/health` every 15 seconds.
+- **Fallback Data**: When the Python agent server is unavailable, Node.js provides static fallback data with offline status indicators.
+- **Connection Status**: Both tabs show whether the Python agent server is connected or disconnected.
 
 ## External Dependencies
 
