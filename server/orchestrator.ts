@@ -1244,6 +1244,26 @@ class AgentOrchestrator {
     this.logEvent("system", null, "status_change", `Demo: ${event}`, { stage, agent, ...details });
   }
 
+  private addInternalLog(
+    stage: string,
+    agent: string,
+    logType: "network_data" | "llm_context" | "tool_call" | "reasoning" | "decision",
+    title: string,
+    content: Record<string, unknown>
+  ): void {
+    if (!this.demoScenario.internalLogs) {
+      this.demoScenario.internalLogs = [];
+    }
+    this.demoScenario.internalLogs.push({
+      timestamp: new Date().toISOString(),
+      stage,
+      agent,
+      log_type: logType,
+      title,
+      content,
+    });
+  }
+
   private async runDemoScenario(
     scenario: string,
     incidentId: string,
@@ -1256,6 +1276,19 @@ class AgentOrchestrator {
     try {
       await delay(2000);
       this.demoScenario.stage = "detection";
+
+      this.addInternalLog("detection", "DetectionAgent", "tool_call", "Querying Prometheus for anomalies", {
+        tool: "PrometheusTools.detect_anomalies",
+        parameters: { device_id: deviceId || "all" },
+        description: "Fetching metric anomalies from Prometheus monitoring system"
+      });
+
+      this.addInternalLog("detection", "DetectionAgent", "network_data", "Retrieved Device Metrics", {
+        device_id: deviceId || "network-wide",
+        metrics_fetched: ["interface_status", "cpu_utilization", "memory_usage", "link_state", "error_counters"],
+        data_source: "Prometheus + SNMP",
+        sample_count: 127
+      });
       
       if (scenario === "link_failure") {
         this.addDemoEvent("detection", "SNMP ifOperStatus polling detected state change", "Telemetry Agent", {
@@ -1280,6 +1313,20 @@ class AgentOrchestrator {
           result: "Alert escalated to RCA Agent"
         });
         
+        this.addInternalLog("detection", "DetectionAgent", "reasoning", "Analyzing Anomaly Patterns", {
+          fault_type: "link_failure",
+          pattern_analysis: "Interface state transition detected: up → down",
+          supporting_evidence: ["ifOperStatus change", "LLDP neighbor lost", "No prior error counters"],
+          conclusion: "Physical link failure pattern confirmed"
+        });
+
+        this.addInternalLog("detection", "DetectionAgent", "decision", "Fault Classification Result", {
+          classified_fault_type: "link_failure",
+          confidence: 100,
+          method: "Statistical baseline comparison + Pattern matching",
+          next_stage: "rca"
+        });
+
         this.demoScenario.stageDetails.detection = {
           ttd: Math.round((Date.now() - startTime) / 1000),
           method: "SNMP ifOperStatus monitoring + Interface flap detection",
@@ -1317,6 +1364,20 @@ class AgentOrchestrator {
           result: "HIGH severity - SLA violation imminent"
         });
         
+        this.addInternalLog("detection", "DetectionAgent", "reasoning", "Analyzing Anomaly Patterns", {
+          fault_type: "port_congestion",
+          pattern_analysis: "Queue depth and latency spike detected via ML model",
+          supporting_evidence: ["Queue 85%", "Latency 250ms", "Packet loss 5%"],
+          conclusion: "Port congestion pattern identified"
+        });
+
+        this.addInternalLog("detection", "DetectionAgent", "decision", "Fault Classification Result", {
+          classified_fault_type: "port_congestion",
+          confidence: 92,
+          method: "Isolation Forest ML + Statistical analysis",
+          next_stage: "rca"
+        });
+
         this.demoScenario.stageDetails.detection = {
           ttd: Math.round((Date.now() - startTime) / 1000),
           method: "Isolation Forest ML + Statistical baseline deviation",
@@ -1354,6 +1415,20 @@ class AgentOrchestrator {
           result: "HIGH severity - Performance degradation detected"
         });
         
+        this.addInternalLog("detection", "DetectionAgent", "reasoning", "Analyzing Anomaly Patterns", {
+          fault_type: "dpu_overload",
+          pattern_analysis: "Resource utilization spike detected via Prometheus",
+          supporting_evidence: ["CPU 95%", "Memory 88%", "Latency 250ms"],
+          conclusion: "DPU resource exhaustion pattern identified"
+        });
+
+        this.addInternalLog("detection", "DetectionAgent", "decision", "Fault Classification Result", {
+          classified_fault_type: "dpu_overload",
+          confidence: 88,
+          method: "Baseline comparison + Trend analysis",
+          next_stage: "rca"
+        });
+
         this.demoScenario.stageDetails.detection = {
           ttd: Math.round((Date.now() - startTime) / 1000),
           method: "Prometheus + Statistical baseline + Trend analysis",
@@ -1370,6 +1445,19 @@ class AgentOrchestrator {
 
       await delay(2000);
       this.demoScenario.stage = "diagnosis";
+
+      this.addInternalLog("rca", "RCAAgent", "reasoning", "Loading RCA Knowledge Base", {
+        fault_type: scenario,
+        knowledge_base_entry: "SONiC BGP/ECMP playbooks",
+        common_causes: ["Hardware failure", "Configuration error", "Traffic surge", "Software bug"],
+        diagnostic_commands: ["show interface status", "show bgp summary", "show system resources"]
+      });
+
+      this.addInternalLog("rca", "RCAAgent", "tool_call", "Querying SONiC Diagnostics", {
+        tool: "SONiCTools.run_diagnostic",
+        commands_executed: ["show interface counters", "show lldp neighbors", "show bgp summary"],
+        target_device: deviceId || "affected-devices"
+      });
 
       if (scenario === "link_failure") {
         this.addDemoEvent("diagnosis", "Root cause analysis initiated", "RCA Agent", {
@@ -1475,8 +1563,26 @@ class AgentOrchestrator {
         };
       }
 
+      this.addInternalLog("rca", "RCAAgent", "decision", "Root Cause Identified", {
+        root_cause: scenario === "link_failure" ? "Physical link failure" : 
+                    scenario === "port_congestion" ? "Traffic surge + QoS misconfiguration" :
+                    "DPU resource exhaustion",
+        confidence: scenario === "link_failure" ? 98 : scenario === "port_congestion" ? 89 : 85,
+        recommended_action: scenario === "link_failure" ? "Wait for routing convergence" :
+                           scenario === "port_congestion" ? "Apply QoS policy + rate limiting" :
+                           "Workload migration",
+        next_stage: "remediation"
+      });
+
       await delay(2000);
       this.demoScenario.stage = "remediation";
+
+      this.addInternalLog("remediation", "RemediationAgent", "reasoning", "Loading Remediation Playbook", {
+        fault_type: scenario,
+        playbook_source: "SONiC Remediation Library v2.1",
+        available_actions: ["routing_convergence", "qos_policy", "rate_limiting", "workload_migration"],
+        risk_level: scenario === "link_failure" ? "LOW" : scenario === "port_congestion" ? "MEDIUM" : "MEDIUM"
+      });
 
       if (scenario === "link_failure") {
         this.addDemoEvent("remediation", "Remediation plan generated", "Remediation Agent", {
@@ -1614,9 +1720,41 @@ class AgentOrchestrator {
         };
       }
 
+      this.addInternalLog("remediation", "RemediationAgent", "tool_call", "Executing SONiC Commands", {
+        tool: "SONiCTools.execute_remediation",
+        commands: scenario === "link_failure" ? ["show ip route", "show bgp neighbors"] :
+                  scenario === "port_congestion" ? ["config qos", "show queue counters"] :
+                  ["show processes cpu", "config migrate-workload"],
+        execution_status: "SUCCESS"
+      });
+
+      this.addInternalLog("remediation", "RemediationAgent", "decision", "Remediation Actions Complete", {
+        actions_executed: scenario === "link_failure" ? ["routing_convergence_monitored"] :
+                         scenario === "port_congestion" ? ["qos_policy_applied", "rate_limiting_configured"] :
+                         ["workload_migration_initiated", "container_rebalanced"],
+        success: true,
+        next_stage: "verification"
+      });
+
       await delay(3000);
       this.demoScenario.stage = "verification";
       const verificationStartTime = Date.now();
+
+      this.addInternalLog("verification", "VerificationAgent", "reasoning", "Loading Verification Criteria", {
+        fault_type: scenario,
+        success_criteria: scenario === "link_failure" ? 
+          ["route_converged", "packet_loss_zero", "latency_within_baseline"] :
+          scenario === "port_congestion" ?
+          ["queue_depth_normal", "latency_reduced", "throughput_restored"] :
+          ["cpu_below_threshold", "memory_stable", "latency_normalized"],
+        verification_method: "Prometheus metrics + SONiC health checks"
+      });
+
+      this.addInternalLog("verification", "VerificationAgent", "tool_call", "Querying Post-Remediation Metrics", {
+        tool: "PrometheusTools.query",
+        metrics_queried: ["interface_status", "latency_p99", "packet_loss_rate", "cpu_utilization"],
+        time_window: "last_60_seconds"
+      });
 
       if (scenario === "link_failure") {
         this.addDemoEvent("verification", "Post-remediation metrics collection", "Verification Agent", {
@@ -1743,9 +1881,29 @@ class AgentOrchestrator {
         };
       }
 
+      this.addInternalLog("verification", "VerificationAgent", "decision", "Verification Complete", {
+        all_criteria_met: true,
+        verification_result: "SUCCESS",
+        metrics_comparison: {
+          before: "anomalous",
+          after: "normal",
+          improvement_percentage: scenario === "link_failure" ? "100%" : scenario === "port_congestion" ? "95%" : "92%"
+        },
+        recommendation: "Incident can be resolved"
+      });
+
       await delay(2000);
       this.demoScenario.stage = "resolved";
       const totalTime = Math.round((Date.now() - startTime) / 1000);
+
+      this.addInternalLog("resolved", "Orchestrator", "decision", "Incident Resolution Summary", {
+        incident_id: incidentId,
+        resolution_status: "SUCCESS",
+        total_time_seconds: totalTime,
+        stages_completed: ["detection", "rca", "remediation", "verification"],
+        human_intervention_required: false,
+        autonomous_healing: true
+      });
       
       this.addDemoEvent("resolved", "Incident resolved - System healthy", "System", {
         result: `Total resolution time: ${totalTime} seconds`,
