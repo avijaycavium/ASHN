@@ -23,7 +23,10 @@ import {
   List,
   ArrowRight,
   CheckCircle,
-  XCircle
+  XCircle,
+  Server,
+  Flame,
+  X
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,9 +34,30 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Device } from "@shared/schema";
+
+const faultTypes = [
+  { id: "cpu_spike", label: "CPU Spike", description: "Simulate high CPU utilization" },
+  { id: "memory_exhaustion", label: "Memory Exhaustion", description: "Simulate high memory usage" },
+  { id: "link_flap", label: "Link Flap", description: "Simulate port state oscillation" },
+  { id: "bgp_instability", label: "BGP Instability", description: "Simulate BGP session issues" },
+  { id: "packet_drops", label: "Packet Drops", description: "Simulate high packet drop rate" },
+  { id: "latency_spike", label: "Latency Spike", description: "Simulate increased latency" },
+];
+
+const severityLevels = [
+  { id: "low", label: "Low", color: "bg-status-away" },
+  { id: "medium", label: "Medium", color: "bg-orange-500" },
+  { id: "high", label: "High", color: "bg-status-busy" },
+  { id: "critical", label: "Critical", color: "bg-red-700" },
+];
 
 interface MetricDetail {
   baseline?: string;
@@ -144,6 +168,254 @@ const stageConfig = {
   verification: { label: "Verification", color: "bg-status-online", icon: <Shield className="h-4 w-4" /> },
   resolved: { label: "Resolved", color: "bg-status-online", icon: <CheckCircle2 className="h-4 w-4" /> },
 };
+
+interface ActiveFault {
+  deviceId: string;
+  faultType: string;
+  severity: string;
+}
+
+function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
+  const [selectedDevice, setSelectedDevice] = useState<string>("");
+  const [faultType, setFaultType] = useState<string>("cpu_spike");
+  const [severity, setSeverity] = useState<string>("medium");
+  const [duration, setDuration] = useState<string>("");
+  const { toast } = useToast();
+
+  const groupedDevices = {
+    core: devices.filter(d => d.type === 'core'),
+    spine: devices.filter(d => d.type === 'spine'),
+    tor: devices.filter(d => d.type === 'tor'),
+    endpoint: devices.filter(d => d.type === 'endpoint'),
+  };
+
+  const { data: activeFaults = [], refetch: refetchFaults } = useQuery<ActiveFault[]>({
+    queryKey: ["/api/faults/active"],
+    refetchInterval: 5000,
+  });
+
+  const injectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/faults/inject", {
+        deviceId: selectedDevice,
+        faultType,
+        severity,
+        duration: duration ? parseInt(duration) : undefined,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Fault Injected",
+        description: `Successfully injected ${faultType.replace(/_/g, " ")} on ${devices.find(d => d.id === selectedDevice)?.name || selectedDevice}`,
+      });
+      refetchFaults();
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Injection Failed",
+        description: error.message || "Failed to inject fault. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: async (deviceId: string) => {
+      const res = await apiRequest("POST", "/api/faults/reset", { deviceId });
+      return res.json();
+    },
+    onSuccess: (_, deviceId) => {
+      toast({
+        title: "Fault Cleared",
+        description: `Successfully cleared fault on ${devices.find(d => d.id === deviceId)?.name || deviceId}`,
+      });
+      refetchFaults();
+      queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Reset Failed",
+        description: error.message || "Failed to clear fault. Please try again.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const selectedDeviceInfo = devices.find(d => d.id === selectedDevice);
+  const selectedDeviceHasFault = activeFaults.some(f => f.deviceId === selectedDevice);
+
+  return (
+    <Card className="border-orange-500/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-md bg-orange-500/10 flex items-center justify-center">
+            <Flame className="h-5 w-5 text-orange-500" />
+          </div>
+          <div>
+            <CardTitle className="text-base">Node Fault Injection</CardTitle>
+            <CardDescription>Manually inject faults into specific network nodes</CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="device-select">Target Device</Label>
+            <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+              <SelectTrigger id="device-select" data-testid="select-fault-device">
+                <SelectValue placeholder="Select a device" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(groupedDevices).map(([type, devs]) => (
+                  devs.length > 0 && (
+                    <div key={type}>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground uppercase">
+                        {type} ({devs.length})
+                      </div>
+                      {devs.map(device => (
+                        <SelectItem key={device.id} value={device.id}>
+                          <div className="flex items-center gap-2">
+                            <Server className="h-3 w-3" />
+                            {device.name}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </div>
+                  )
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="fault-type-select">Fault Type</Label>
+            <Select value={faultType} onValueChange={setFaultType}>
+              <SelectTrigger id="fault-type-select" data-testid="select-fault-type">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {faultTypes.map(ft => (
+                  <SelectItem key={ft.id} value={ft.id}>
+                    {ft.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="severity-select">Severity</Label>
+            <Select value={severity} onValueChange={setSeverity}>
+              <SelectTrigger id="severity-select" data-testid="select-fault-severity">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {severityLevels.map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    <div className="flex items-center gap-2">
+                      <div className={cn("h-2 w-2 rounded-full", s.color)} />
+                      {s.label}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="duration-input">Duration (seconds)</Label>
+            <Input
+              id="duration-input"
+              type="number"
+              placeholder="Auto-clear after..."
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              min="1"
+              max="3600"
+              data-testid="input-fault-duration"
+            />
+          </div>
+        </div>
+
+        {selectedDeviceInfo && (
+          <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-md">
+            <Server className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">
+              <strong>{selectedDeviceInfo.name}</strong> ({selectedDeviceInfo.type}) - 
+              Status: <Badge variant={selectedDeviceInfo.status === 'healthy' ? 'default' : 'destructive'} className="ml-1">
+                {selectedDeviceInfo.status}
+              </Badge>
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => injectMutation.mutate()}
+            disabled={!selectedDevice || injectMutation.isPending}
+            className="gap-1.5"
+            data-testid="button-inject-fault"
+          >
+            {injectMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Zap className="h-4 w-4" />
+            )}
+            Inject Fault
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => selectedDevice && resetMutation.mutate(selectedDevice)}
+            disabled={!selectedDevice || resetMutation.isPending || !selectedDeviceHasFault}
+            className="gap-1.5"
+            data-testid="button-reset-fault"
+          >
+            {resetMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4" />
+            )}
+            Clear Fault
+          </Button>
+        </div>
+
+        {activeFaults.length > 0 && (
+          <div className="space-y-2">
+            <Label>Active Faults ({activeFaults.length})</Label>
+            <div className="flex flex-wrap gap-2">
+              {activeFaults.map(fault => {
+                const device = devices.find(d => d.id === fault.deviceId);
+                const severityInfo = severityLevels.find(s => s.id === fault.severity);
+                return (
+                  <Badge 
+                    key={fault.deviceId} 
+                    variant="outline" 
+                    className="gap-1.5 pr-1"
+                    data-testid={`badge-fault-${fault.deviceId}`}
+                  >
+                    <div className={cn("h-2 w-2 rounded-full", severityInfo?.color || "bg-orange-500")} />
+                    {device?.name || fault.deviceId}: {fault.faultType.replace(/_/g, " ")}
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-4 w-4 ml-1 hover:bg-destructive hover:text-destructive-foreground"
+                      onClick={() => resetMutation.mutate(fault.deviceId)}
+                      data-testid={`button-clear-fault-${fault.deviceId}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </Badge>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function StageIndicator({ currentStage }: { currentStage: DemoScenarioStatus["stage"] }) {
   const stages: DemoScenarioStatus["stage"][] = ["detection", "diagnosis", "remediation", "verification", "resolved"];
@@ -718,6 +990,12 @@ export default function DemoConsolePage() {
             </Card>
           ))}
         </div>
+
+        {devices && devices.length > 0 && (
+          <div className="mb-4">
+            <NodeFaultInjectionPanel devices={devices} />
+          </div>
+        )}
 
         {(demoStatus?.active || isResolved) && (
           <div className="space-y-4">

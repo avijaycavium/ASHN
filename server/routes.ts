@@ -19,7 +19,7 @@ import {
   getPrometheusConfig,
   updatePrometheusConfig
 } from "./prometheus-integration";
-import { injectFault, clearFault, hasFault, getFault, formatPrometheusMetrics, generateAllDeviceMetrics } from "./telemetry-exporter";
+import { injectFault, clearFault, hasFault, getFault, getAllActiveFaults, formatPrometheusMetrics, generateAllDeviceMetrics } from "./telemetry-exporter";
 import { generate52DeviceTopology } from "./topology-generator";
 import { processNLQuery, getQuerySuggestions } from "./nl-query-service";
 import { detectionAgent } from "./detection-agent";
@@ -852,6 +852,15 @@ export async function registerRoutes(
       });
     } catch (error) {
       res.status(500).json({ error: "Failed to get fault status" });
+    }
+  });
+
+  app.get("/api/faults/active", async (req, res) => {
+    try {
+      const activeFaults = getAllActiveFaults();
+      res.json(activeFaults);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get active faults" });
     }
   });
 

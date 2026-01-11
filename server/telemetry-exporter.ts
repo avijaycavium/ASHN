@@ -31,6 +31,13 @@ export function getFault(deviceId: string): { faultType: string; severity: strin
   return activeFaults.get(deviceId);
 }
 
+export function getAllActiveFaults(): Array<{ deviceId: string; faultType: string; severity: string }> {
+  return Array.from(activeFaults.entries()).map(([deviceId, fault]) => ({
+    deviceId,
+    ...fault,
+  }));
+}
+
 function generateSystemMetrics(device: Device): MetricValue[] {
   const fault = getFault(device.id);
   const isLinkFlap = fault?.faultType === "link_flap";
