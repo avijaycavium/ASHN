@@ -227,7 +227,7 @@ function NodeFaultInjectionPanel({ devices, onScenarioRecommendation }: NodeFaul
   const deviceTier = selectedDeviceInfo?.type || "";
   const relevantFaultTypes = deviceTier ? getRelevantFaultTypes(deviceTier) : faultTypes;
   
-  // Update fault type and notify parent when device selection changes
+  // Update fault type when device selection changes (no recommendation until inject)
   const handleDeviceChange = (deviceId: string) => {
     setSelectedDevice(deviceId);
     const device = devices.find(d => d.id === deviceId);
@@ -238,12 +238,8 @@ function NodeFaultInjectionPanel({ devices, onScenarioRecommendation }: NodeFaul
       if (relevantFaults.length > 0) {
         setFaultType(relevantFaults[0].id);
       }
-      // Notify parent of recommended scenario
-      const recommendedScenario = tierToScenarioMap[tier] || null;
-      onScenarioRecommendation?.(recommendedScenario, { id: device.id, name: device.name, tier });
     } else {
       setFaultType("");
-      onScenarioRecommendation?.(null, null);
     }
   };
 
@@ -269,6 +265,14 @@ function NodeFaultInjectionPanel({ devices, onScenarioRecommendation }: NodeFaul
       });
       refetchFaults();
       queryClient.invalidateQueries({ queryKey: ["/api/devices"] });
+      
+      // Trigger scenario recommendation AFTER fault is injected
+      const device = devices.find(d => d.id === selectedDevice);
+      if (device) {
+        const tier = device.type || "";
+        const recommendedScenario = tierToScenarioMap[tier] || null;
+        onScenarioRecommendation?.(recommendedScenario, { id: device.id, name: device.name, tier });
+      }
     },
     onError: (error: Error) => {
       toast({
