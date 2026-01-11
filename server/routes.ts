@@ -145,7 +145,9 @@ export async function registerRoutes(
 
   app.get("/api/agents", async (req, res) => {
     try {
-      const agents = await databaseStorage.getAgents();
+      // Use orchestrator agents as the source of truth for operational agents
+      // This ensures consistency with /api/orchestrator/agents
+      const agents = orchestrator.getAgents();
       res.json(agents);
     } catch (error) {
       res.status(500).json({ error: "Failed to fetch agents" });
@@ -154,7 +156,8 @@ export async function registerRoutes(
 
   app.get("/api/agents/:id", async (req, res) => {
     try {
-      const agent = await databaseStorage.getAgent(req.params.id);
+      // Use orchestrator agent by ID for consistency
+      const agent = orchestrator.getAgent(req.params.id);
       if (!agent) {
         return res.status(404).json({ error: "Agent not found" });
       }

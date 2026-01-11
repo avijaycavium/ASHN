@@ -825,7 +825,7 @@ class AgentOrchestrator {
     if (latestMetric) {
       if (latestMetric.cpu > 80) anomalies.push("High CPU utilization");
       if (latestMetric.latency > 50) anomalies.push("High latency detected");
-      if (latestMetric.ber > 0.001) anomalies.push("Elevated bit error rate");
+      if (latestMetric.packetDrops > 100) anomalies.push("Elevated packet drops");
     }
 
     execution.confidence = anomalies.length > 0 ? 85 : 99;

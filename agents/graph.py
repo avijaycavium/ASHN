@@ -9,6 +9,7 @@ from datetime import datetime
 
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
+from pydantic import SecretStr
 
 from .state import IncidentState, create_initial_state
 from .nodes.detection import detection_node, detection_node_with_ai
@@ -32,7 +33,7 @@ def get_llm() -> ChatOpenAI | None:
         return ChatOpenAI(
             model="gpt-4o",
             base_url="https://ai.replit.dev",
-            api_key=api_key,
+            api_key=SecretStr(api_key),
             temperature=0.3
         )
     except Exception as e:
