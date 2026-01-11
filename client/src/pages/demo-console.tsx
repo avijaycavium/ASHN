@@ -1066,18 +1066,24 @@ export default function DemoConsolePage() {
             const isRecommended = recommendedScenario === scenario.id;
             const isSelected = selectedScenario === scenario.id;
             const showConfirmation = awaitingConfirmation && isSelected && isRecommended;
+            const isThisScenarioType = demoStatus?.type === scenario.id;
+            const isActiveScenario = demoStatus?.active && isThisScenarioType && !isResolved;
+            const isResolvedScenario = isResolved && isThisScenarioType;
+            const showRecommendedRing = isRecommended && !isActiveScenario && !isResolvedScenario;
+            const isInProgressNotThis = demoStatus?.active && !isResolved && !isThisScenarioType;
             
             return (
             <Card 
               key={scenario.id}
               className={cn(
                 "transition-all",
-                isSelected && "ring-2 ring-primary",
-                isRecommended && !isSelected && "ring-2 ring-orange-500 ring-offset-2",
-                isRunning && !isSelected && "opacity-50 pointer-events-none",
-                !isRunning && !awaitingConfirmation && "cursor-pointer"
+                isActiveScenario && "ring-2 ring-primary shadow-lg",
+                isResolvedScenario && "ring-2 ring-status-online shadow-lg",
+                showRecommendedRing && "ring-2 ring-orange-500 ring-offset-2",
+                isInProgressNotThis && "opacity-50 pointer-events-none",
+                !isInProgressNotThis && !awaitingConfirmation && "cursor-pointer"
               )}
-              onClick={() => !isRunning && !awaitingConfirmation && setSelectedScenario(scenario.id)}
+              onClick={() => !isInProgressNotThis && !awaitingConfirmation && setSelectedScenario(scenario.id)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
