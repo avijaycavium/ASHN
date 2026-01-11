@@ -10,13 +10,16 @@ import {
   Target,
   Clock,
   Server,
-  Cpu
+  Cpu,
+  Download
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface InternalLogEntry {
   timestamp: string;
@@ -174,6 +177,51 @@ export function AgentInternalLogs({ logs, className }: AgentInternalLogsProps) {
     remediation: true,
     verification: true,
   });
+  const { toast } = useToast();
+
+  const handleExportLogs = () => {
+    if (!logs || logs.length === 0) {
+      toast({
+        title: "No logs to export",
+        description: "Run a healing workflow first to generate logs.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      totalEntries: logs.length,
+      stageBreakdown: logs.reduce((acc, log) => {
+        const stage = log.stage || 'unknown';
+        acc[stage] = (acc[stage] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+      logs: logs.map(log => ({
+        timestamp: log.timestamp,
+        stage: log.stage,
+        agent: log.agent,
+        logType: log.log_type,
+        title: log.title,
+        content: log.content,
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `agent-logs-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Logs exported",
+      description: `${logs.length} log entries exported successfully.`,
+    });
+  };
 
   if (!logs || logs.length === 0) {
     return (
@@ -210,14 +258,25 @@ export function AgentInternalLogs({ logs, className }: AgentInternalLogsProps) {
   return (
     <Card className={className}>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm flex items-center gap-2">
             <Cpu className="h-4 w-4" />
             Agent Internal Logs
           </CardTitle>
-          <Badge variant="outline" className="text-xs">
-            {logs.length} entries
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs">
+              {logs.length} entries
+            </Badge>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              onClick={handleExportLogs}
+              data-testid="button-export-logs"
+            >
+              <Download className="h-3.5 w-3.5 mr-1.5" />
+              Export
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="p-0">
