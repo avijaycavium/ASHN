@@ -639,6 +639,33 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/metrics/collector/status", async (req, res) => {
+    try {
+      const status = metricsCollector.getStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get collector status" });
+    }
+  });
+
+  app.post("/api/metrics/collector/trigger", async (req, res) => {
+    try {
+      await metricsCollector.triggerCollection();
+      res.json({ success: true, message: "Metrics collection triggered" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to trigger collection" });
+    }
+  });
+
+  app.post("/api/metrics/collector/restart", async (req, res) => {
+    try {
+      await metricsCollector.restart();
+      res.json({ success: true, message: "Metrics collector restarted" });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to restart collector" });
+    }
+  });
+
   // Metrics API endpoints
   app.get("/api/metrics/refresh", async (req, res) => {
     try {
