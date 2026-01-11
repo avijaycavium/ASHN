@@ -1,5 +1,5 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { 
   Bot, 
   CheckCircle2, 
@@ -19,17 +19,15 @@ import {
   TrendingDown,
   Minus,
   Server,
-  Cpu,
-  MemoryStick,
   Network,
-  Link2,
-  Eye,
   Wrench,
   Sparkles,
   Brain,
   Search,
   Shield,
-  CheckSquare
+  CheckSquare,
+  Filter,
+  Layers
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,7 +40,7 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Agent, AgentStatus, OrchestratorStatus, Device, SSEMessage } from "@shared/schema";
-import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 
 const statusConfig: Record<AgentStatus, { color: string; bgColor: string; icon: React.ReactNode; label: string }> = {
   active: {
@@ -106,7 +104,7 @@ interface AnomalyEvent {
   incidentId?: string;
 }
 
-// LangGraph Agent types (from Python agent framework)
+// LangGraph Agent types (from Python agent framework - source of truth)
 interface LangGraphAgentCapability {
   name: string;
   description: string;
@@ -157,21 +155,23 @@ interface ToolsHealth {
   };
 }
 
-function formatTimeAgo(dateString: string): string {
-  const date = new Date(dateString);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  
-  const diffDays = Math.floor(diffHours / 24);
-  return `${diffDays}d ago`;
+// Unified agent type for display
+interface UnifiedAgent {
+  id: string;
+  name: string;
+  type: string;
+  status: AgentStatus;
+  description: string;
+  capabilities: { name: string; description: string }[];
+  tools?: string[];
+  usesAI: boolean;
+  framework: "langgraph" | "orchestrator";
+  processedTasks?: number;
+  successRate?: number;
+  lastActive?: string;
 }
+
+type AgentFilter = "all" | "langgraph" | "orchestrator" | "ai" | "active";
 
 function SparkChart({ data, color }: { data: TelemetryDataPoint[], color: string }) {
   if (!data || data.length < 2) return null;
@@ -206,17 +206,38 @@ function TrendIndicator({ current, previous }: { current: number, previous: numb
   return <span className="flex items-center gap-1 text-xs text-status-online"><TrendingDown className="h-3 w-3" /> {pct}%</span>;
 }
 
+// Get agent icon based on type
+function getAgentIcon(type: string) {
+  switch (type) {
+    case "detection":
+    case "anomaly":
+      return <Search className="h-5 w-5" />;
+    case "rca":
+      return <Brain className="h-5 w-5" />;
+    case "remediation":
+      return <Shield className="h-5 w-5" />;
+    case "verification":
+      return <CheckSquare className="h-5 w-5" />;
+    case "monitor":
+      return <Activity className="h-5 w-5" />;
+    case "telemetry":
+      return <Gauge className="h-5 w-5" />;
+    case "learning":
+      return <Sparkles className="h-5 w-5" />;
+    case "compliance":
+      return <CheckCircle2 className="h-5 w-5" />;
+    default:
+      return <Bot className="h-5 w-5" />;
+  }
+}
+
 export default function AgentsPage() {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("agents");
+  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
   const [telemetryData, setTelemetryData] = useState<Map<string, DeviceTelemetry>>(new Map());
   const [anomalyEvents, setAnomalyEvents] = useState<AnomalyEvent[]>([]);
   const [isSSEConnected, setIsSSEConnected] = useState(false);
-  
-  const { data: agents, isLoading: agentsLoading, refetch: refetchAgents } = useQuery<Agent[]>({
-    queryKey: ["/api/orchestrator/agents"],
-    refetchInterval: 5000,
-  });
 
   const { data: orchestratorStatus } = useQuery<OrchestratorStatus>({
     queryKey: ["/api/orchestrator/status"],
@@ -228,8 +249,14 @@ export default function AgentsPage() {
     refetchInterval: 10000,
   });
 
-  // LangGraph agent registry from Python service
-  const { data: langGraphAgents, isLoading: langGraphLoading } = useQuery<LangGraphAgentRegistry>({
+  // Orchestrator agents from Node.js (includes operational metrics)
+  const { data: orchestratorAgents, isLoading: orchestratorLoading, refetch: refetchOrchestrator } = useQuery<Agent[]>({
+    queryKey: ["/api/orchestrator/agents"],
+    refetchInterval: 5000,
+  });
+
+  // LangGraph agent registry from Python service (SOURCE OF TRUTH for healing pipeline)
+  const { data: langGraphAgents, isLoading: langGraphLoading, refetch: refetchLangGraph } = useQuery<LangGraphAgentRegistry>({
     queryKey: ["/api/langgraph/agents"],
     refetchInterval: 10000,
   });
@@ -239,6 +266,84 @@ export default function AgentsPage() {
     queryKey: ["/api/tools/health"],
     refetchInterval: 15000,
   });
+
+  // Merge agents: LangGraph takes precedence for healing pipeline roles
+  // Orchestrator-only agents are included for operational visibility
+  const unifiedAgents: UnifiedAgent[] = [];
+  const langGraphTypes = new Set<string>();
+  
+  // First, add LangGraph agents (primary source for healing pipeline)
+  if (langGraphAgents?.agents) {
+    langGraphAgents.agents.forEach(agent => {
+      langGraphTypes.add(agent.type);
+      
+      // Find matching orchestrator agent for enrichment
+      const orchestratorMatch = orchestratorAgents?.find(oa => oa.type === agent.type);
+      
+      unifiedAgents.push({
+        id: agent.id,
+        name: agent.name,
+        type: agent.type,
+        status: agent.status,
+        description: agent.description,
+        capabilities: agent.capabilities,
+        tools: agent.tools,
+        usesAI: agent.usesAI,
+        framework: "langgraph",
+        lastActive: agent.lastActive,
+        processedTasks: orchestratorMatch?.processedTasks,
+        successRate: orchestratorMatch?.successRate,
+      });
+    });
+  }
+  
+  // Add orchestrator-only agents (not in LangGraph - operational support agents)
+  if (orchestratorAgents) {
+    orchestratorAgents.forEach(agent => {
+      // Skip if this type already exists from LangGraph
+      if (langGraphTypes.has(agent.type)) return;
+      
+      // Build description from capabilities if available
+      const description = agent.capabilities && agent.capabilities.length > 0
+        ? agent.capabilities.map(c => c.description || c.name).slice(0, 2).join('. ')
+        : `${agent.name} - ${agent.type} operations`;
+      
+      unifiedAgents.push({
+        id: agent.id,
+        name: agent.name,
+        type: agent.type,
+        status: agent.status as AgentStatus,
+        description: description,
+        capabilities: agent.capabilities || [],
+        usesAI: agent.type === "anomaly" || agent.type === "learning", // These may use AI patterns
+        framework: "orchestrator",
+        lastActive: agent.lastActive,
+        processedTasks: agent.processedTasks,
+        successRate: agent.successRate,
+      });
+    });
+  }
+
+  // Filter agents based on selected filter
+  const filteredAgents = unifiedAgents.filter(agent => {
+    switch (agentFilter) {
+      case "langgraph":
+        return agent.framework === "langgraph";
+      case "orchestrator":
+        return agent.framework === "orchestrator";
+      case "ai":
+        return agent.usesAI;
+      case "active":
+        return agent.status === "active" || agent.status === "processing";
+      default:
+        return true;
+    }
+  });
+
+  const refetchAgents = () => {
+    refetchLangGraph();
+    refetchOrchestrator();
+  };
 
   // Initialize telemetry data from devices
   useEffect(() => {
@@ -380,16 +485,21 @@ export default function AgentsPage() {
     },
   });
 
-  const stats = {
-    total: agents?.length || 0,
-    active: agents?.filter(a => a.status === "active" || a.status === "processing").length || 0,
-    idle: agents?.filter(a => a.status === "idle").length || 0,
-    error: agents?.filter(a => a.status === "error").length || 0,
-    avgSuccessRate: agents?.length 
-      ? Math.round(agents.reduce((sum, a) => sum + a.successRate, 0) / agents.length) 
+  const agentStats = {
+    total: unifiedAgents.length,
+    active: unifiedAgents.filter(a => a.status === "active" || a.status === "processing").length,
+    idle: unifiedAgents.filter(a => a.status === "idle").length,
+    offline: unifiedAgents.filter(a => a.status === "offline").length,
+    aiPowered: unifiedAgents.filter(a => a.usesAI).length,
+    langGraph: unifiedAgents.filter(a => a.framework === "langgraph").length,
+    orchestrator: unifiedAgents.filter(a => a.framework === "orchestrator").length,
+    avgSuccessRate: unifiedAgents.filter(a => a.successRate !== undefined).length > 0 
+      ? Math.round(unifiedAgents.filter(a => a.successRate !== undefined).reduce((sum, a) => sum + (a.successRate || 0), 0) / unifiedAgents.filter(a => a.successRate !== undefined).length)
       : 0,
-    totalTasks: agents?.reduce((sum, a) => sum + a.processedTasks, 0) || 0,
+    totalTasks: unifiedAgents.reduce((sum, a) => sum + (a.processedTasks || 0), 0),
   };
+
+  const isLoading = langGraphLoading || orchestratorLoading;
 
   const isRunning = orchestratorStatus?.status === "running";
   const telemetryArray = Array.from(telemetryData.values());
@@ -422,6 +532,13 @@ export default function AgentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Badge className={cn(
+            "gap-1.5",
+            langGraphAgents?.connected ? "bg-status-online text-white" : "bg-muted text-muted-foreground"
+          )}>
+            <Brain className="h-3 w-3" />
+            {langGraphAgents?.connected ? "LangGraph Connected" : "LangGraph Offline"}
+          </Badge>
           <Badge className={cn(
             "gap-1.5",
             isSSEConnected ? "bg-status-online text-white" : "bg-muted text-muted-foreground"
@@ -484,35 +601,7 @@ export default function AgentsPage() {
             >
               <Bot className="h-4 w-4" />
               Agents
-            </TabsTrigger>
-            <TabsTrigger 
-              value="telemetry" 
-              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
-              data-testid="tab-telemetry"
-            >
-              <Gauge className="h-4 w-4" />
-              Telemetry Operations
-              <Badge variant="secondary" className="ml-1">{telemetryStats.totalDevices}</Badge>
-            </TabsTrigger>
-            <TabsTrigger 
-              value="anomaly" 
-              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
-              data-testid="tab-anomaly"
-            >
-              <AlertTriangle className="h-4 w-4" />
-              Anomaly Surveillance
-              {anomalyStats.total > 0 && (
-                <Badge variant="destructive" className="ml-1">{anomalyStats.total}</Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger 
-              value="langgraph" 
-              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
-              data-testid="tab-langgraph"
-            >
-              <Brain className="h-4 w-4" />
-              LangGraph Agents
-              <Badge variant="outline" className="ml-1">{langGraphAgents?.totalAgents || 4}</Badge>
+              <Badge variant="outline" className="ml-1">{agentStats.total}</Badge>
             </TabsTrigger>
             <TabsTrigger 
               value="tools" 
@@ -528,17 +617,39 @@ export default function AgentsPage() {
                 {toolsHealth?.summary?.connected || 0}/{toolsHealth?.summary?.total || 3}
               </Badge>
             </TabsTrigger>
+            <TabsTrigger 
+              value="telemetry" 
+              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
+              data-testid="tab-telemetry"
+            >
+              <Gauge className="h-4 w-4" />
+              Telemetry
+              <Badge variant="secondary" className="ml-1">{telemetryStats.totalDevices}</Badge>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="anomaly" 
+              className="gap-2 data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary rounded-none px-4 py-3"
+              data-testid="tab-anomaly"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Anomalies
+              {anomalyStats.total > 0 && (
+                <Badge variant="destructive" className="ml-1">{anomalyStats.total}</Badge>
+              )}
+            </TabsTrigger>
           </TabsList>
         </div>
 
+        {/* Unified Agents Tab */}
         <TabsContent value="agents" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {/* Stats Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Agents</CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold" data-testid="stat-total">{stats.total}</span>
+                <span className="text-2xl font-semibold" data-testid="stat-total">{agentStats.total}</span>
               </CardContent>
             </Card>
             <Card>
@@ -549,7 +660,7 @@ export default function AgentsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold text-status-online" data-testid="stat-active">{stats.active}</span>
+                <span className="text-2xl font-semibold text-status-online" data-testid="stat-active">{agentStats.active}</span>
               </CardContent>
             </Card>
             <Card>
@@ -560,450 +671,115 @@ export default function AgentsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold text-muted-foreground" data-testid="stat-idle">{stats.idle}</span>
+                <span className="text-2xl font-semibold text-muted-foreground" data-testid="stat-idle">{agentStats.idle}</span>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-status-busy" />
-                  Error
+                  <span className="h-2 w-2 rounded-full bg-status-offline" />
+                  Offline
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold text-status-busy" data-testid="stat-error">{stats.error}</span>
+                <span className="text-2xl font-semibold text-status-offline" data-testid="stat-offline">{agentStats.offline}</span>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                  <BarChart3 className="h-3 w-3" />
-                  Avg Success
+                  <Sparkles className="h-3 w-3" />
+                  AI-Powered
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold" data-testid="stat-success">{stats.avgSuccessRate}%</span>
+                <span className="text-2xl font-semibold" data-testid="stat-ai">{agentStats.aiPowered}</span>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                   <Activity className="h-3 w-3" />
-                  Tasks Processed
+                  Active Workflows
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <span className="text-2xl font-semibold" data-testid="stat-tasks">{stats.totalTasks}</span>
+                <span className="text-2xl font-semibold" data-testid="stat-workflows">{langGraphAgents?.activeWorkflows || 0}</span>
               </CardContent>
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {agentsLoading ? (
-              [...Array(6)].map((_, i) => (
-                <Skeleton key={i} className="h-48" />
-              ))
-            ) : (
-              agents?.map((agent) => {
-                const config = statusConfig[agent.status];
-                return (
-                  <Card key={agent.id} className="hover-elevate" data-testid={`agent-card-${agent.id}`}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={cn(
-                            "h-10 w-10 rounded-md flex items-center justify-center",
-                            agent.status === "active" || agent.status === "processing" 
-                              ? "bg-primary/10" 
-                              : "bg-muted"
-                          )}>
-                            <Bot className={cn("h-5 w-5", config.color)} />
-                          </div>
-                          <div>
-                            <CardTitle className="text-base">{agent.name}</CardTitle>
-                            <p className="text-xs text-muted-foreground mt-0.5">{agent.type}</p>
-                          </div>
-                        </div>
-                        <Badge className={cn(
-                          "gap-1",
-                          agent.status === "active" && "bg-status-online text-white",
-                          agent.status === "processing" && "bg-primary text-primary-foreground",
-                          agent.status === "idle" && "bg-muted text-muted-foreground",
-                          agent.status === "error" && "bg-status-busy text-white",
-                          agent.status === "offline" && "bg-status-offline text-white"
-                        )}>
-                          {config.icon}
-                          {config.label}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {agent.currentTask && (
-                        <div className="p-2 rounded-md bg-muted/50">
-                          <p className="text-xs text-muted-foreground mb-1">Current Task</p>
-                          <p className="text-sm">{agent.currentTask}</p>
-                        </div>
-                      )}
-                      
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Success Rate</span>
-                          <span className="font-mono">{agent.successRate}%</span>
-                        </div>
-                        <Progress value={agent.successRate} className="h-1.5" />
-                      </div>
-
-                      <div className="flex items-center justify-between text-sm pt-2 border-t border-border">
-                        <div className="flex items-center gap-1 text-muted-foreground">
-                          <Activity className="h-3 w-3" />
-                          <span>{agent.processedTasks} tasks</span>
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          Last active: {formatTimeAgo(agent.lastActive)}
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
+          {/* Filter Chips */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground flex items-center gap-1">
+              <Filter className="h-4 w-4" />
+              Filter:
+            </span>
+            <Button
+              variant={agentFilter === "all" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAgentFilter("all")}
+              data-testid="filter-all"
+            >
+              All ({unifiedAgents.length})
+            </Button>
+            <Button
+              variant={agentFilter === "langgraph" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAgentFilter("langgraph")}
+              className="gap-1"
+              data-testid="filter-langgraph"
+            >
+              <Brain className="h-3 w-3" />
+              LangGraph ({agentStats.langGraph})
+            </Button>
+            <Button
+              variant={agentFilter === "orchestrator" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAgentFilter("orchestrator")}
+              className="gap-1"
+              data-testid="filter-orchestrator"
+            >
+              <Layers className="h-3 w-3" />
+              Orchestrator ({agentStats.orchestrator})
+            </Button>
+            <Button
+              variant={agentFilter === "ai" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAgentFilter("ai")}
+              className="gap-1"
+              data-testid="filter-ai"
+            >
+              <Sparkles className="h-3 w-3" />
+              AI-Powered ({agentStats.aiPowered})
+            </Button>
+            <Button
+              variant={agentFilter === "active" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setAgentFilter("active")}
+              data-testid="filter-active"
+            >
+              Active ({agentStats.active})
+            </Button>
           </div>
-        </TabsContent>
 
-        <TabsContent value="telemetry" className="flex-1 overflow-hidden mt-0">
-          <div className="h-full flex flex-col p-4 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <Server className="h-3 w-3" />
-                    Monitored Devices
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold" data-testid="telemetry-total">{telemetryStats.totalDevices}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-status-online" />
-                    Healthy
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-status-online" data-testid="telemetry-healthy">{telemetryStats.healthyDevices}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-yellow-500" />
-                    Degraded
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-yellow-500" data-testid="telemetry-degraded">{telemetryStats.degradedDevices}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-status-busy" />
-                    Critical
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-status-busy" data-testid="telemetry-critical">{telemetryStats.criticalDevices}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <Cpu className="h-3 w-3" />
-                    Avg CPU
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold" data-testid="telemetry-avgcpu">{telemetryStats.avgCpu}%</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <MemoryStick className="h-3 w-3" />
-                    Avg Memory
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold" data-testid="telemetry-avgmem">{telemetryStats.avgMemory}%</span>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="flex-1 overflow-hidden">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <Activity className="h-4 w-4" />
-                  Live Device Telemetry
-                  <Badge variant="outline" className="ml-2">Real-time</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 h-[calc(100%-4rem)]">
-                <ScrollArea className="h-full">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="sticky top-0 bg-background border-b border-border">
-                        <tr>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Device</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Tier</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">CPU</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">CPU Trend</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Memory</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Memory Trend</th>
-                          <th className="text-left p-3 font-medium text-muted-foreground">Last Update</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sortedTelemetry.map((device) => {
-                          const prevCpu = device.cpuHistory.length > 1 ? device.cpuHistory[device.cpuHistory.length - 2].value : device.cpu;
-                          const prevMem = device.memoryHistory.length > 1 ? device.memoryHistory[device.memoryHistory.length - 2].value : device.memory;
-                          
-                          return (
-                            <tr 
-                              key={device.deviceId} 
-                              className="border-b border-border last:border-0 hover-elevate"
-                              data-testid={`telemetry-row-${device.deviceId}`}
-                            >
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <Server className="h-4 w-4 text-muted-foreground" />
-                                  <span className="font-mono text-xs">{device.deviceName}</span>
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <Badge variant="outline" className="font-mono text-xs uppercase">
-                                  {device.tier}
-                                </Badge>
-                              </td>
-                              <td className="p-3">
-                                <Badge className={cn(
-                                  device.status === "healthy" && "bg-status-online text-white",
-                                  device.status === "degraded" && "bg-yellow-500 text-white",
-                                  device.status === "critical" && "bg-status-busy text-white",
-                                  device.status === "offline" && "bg-status-offline text-white"
-                                )}>
-                                  {device.status}
-                                </Badge>
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <Progress 
-                                    value={device.cpu} 
-                                    className={cn(
-                                      "h-2 w-16",
-                                      device.cpu > 80 && "[&>div]:bg-status-busy",
-                                      device.cpu > 60 && device.cpu <= 80 && "[&>div]:bg-yellow-500"
-                                    )}
-                                  />
-                                  <span className="font-mono text-xs w-10">{device.cpu}%</span>
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <SparkChart data={device.cpuHistory} color="hsl(var(--primary))" />
-                                  <TrendIndicator current={device.cpu} previous={prevCpu} />
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <Progress 
-                                    value={device.memory} 
-                                    className={cn(
-                                      "h-2 w-16",
-                                      device.memory > 80 && "[&>div]:bg-status-busy",
-                                      device.memory > 60 && device.memory <= 80 && "[&>div]:bg-yellow-500"
-                                    )}
-                                  />
-                                  <span className="font-mono text-xs w-10">{device.memory}%</span>
-                                </div>
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center gap-2">
-                                  <SparkChart data={device.memoryHistory} color="hsl(var(--chart-2))" />
-                                  <TrendIndicator current={device.memory} previous={prevMem} />
-                                </div>
-                              </td>
-                              <td className="p-3 text-xs text-muted-foreground">
-                                {formatTimeAgo(device.lastUpdate)}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </ScrollArea>
+          {/* Connection Status */}
+          {!langGraphAgents?.connected && (
+            <Card className="border-dashed border-2 bg-muted/20">
+              <CardContent className="flex items-center gap-4 py-4">
+                <AlertCircle className="h-8 w-8 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Python Agent Server Offline</p>
+                  <p className="text-xs text-muted-foreground">
+                    {langGraphAgents?.note || "Start the agent server on port 5001 for live status. Showing cached data."}
+                  </p>
+                </div>
               </CardContent>
             </Card>
-          </div>
-        </TabsContent>
+          )}
 
-        <TabsContent value="anomaly" className="flex-1 overflow-hidden mt-0">
-          <div className="h-full flex flex-col p-4 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <Eye className="h-3 w-3" />
-                    Total Anomalies
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold" data-testid="anomaly-total">{anomalyStats.total}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-status-busy animate-pulse" />
-                    Critical
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-status-busy" data-testid="anomaly-critical">{anomalyStats.critical}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-orange-500" />
-                    High
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-orange-500" data-testid="anomaly-high">{anomalyStats.high}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-yellow-500" />
-                    Medium
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-yellow-500" data-testid="anomaly-medium">{anomalyStats.medium}</span>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-blue-500" />
-                    Low
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <span className="text-2xl font-semibold text-blue-500" data-testid="anomaly-low">{anomalyStats.low}</span>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="flex-1 overflow-hidden">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  Anomaly Events
-                  <Badge variant="outline" className="ml-2">Live Feed</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 h-[calc(100%-4rem)]">
-                <ScrollArea className="h-full">
-                  {anomalyEvents.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
-                      <CheckCircle2 className="h-12 w-12 mb-4 opacity-50" />
-                      <p className="text-sm">No anomalies detected</p>
-                      <p className="text-xs mt-1">System is operating within normal parameters</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 p-4">
-                      {anomalyEvents.map((anomaly) => (
-                        <div 
-                          key={anomaly.id}
-                          className={cn(
-                            "p-3 rounded-md border",
-                            anomaly.severity === "critical" && "border-status-busy bg-status-busy/5",
-                            anomaly.severity === "high" && "border-orange-500 bg-orange-500/5",
-                            anomaly.severity === "medium" && "border-yellow-500 bg-yellow-500/5",
-                            anomaly.severity === "low" && "border-blue-500 bg-blue-500/5"
-                          )}
-                          data-testid={`anomaly-event-${anomaly.id}`}
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex items-start gap-3">
-                              <AlertTriangle className={cn(
-                                "h-5 w-5 mt-0.5",
-                                anomaly.severity === "critical" && "text-status-busy",
-                                anomaly.severity === "high" && "text-orange-500",
-                                anomaly.severity === "medium" && "text-yellow-500",
-                                anomaly.severity === "low" && "text-blue-500"
-                              )} />
-                              <div>
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">{anomaly.deviceName}</span>
-                                  <Badge variant="outline" className="text-xs uppercase">{anomaly.severity}</Badge>
-                                </div>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                  <span className="font-mono">{anomaly.metric}</span>: {anomaly.value} 
-                                  <span className="text-xs ml-1">(threshold: {anomaly.threshold})</span>
-                                </p>
-                                {anomaly.incidentId && (
-                                  <Badge variant="secondary" className="mt-2 text-xs">
-                                    <Link2 className="h-3 w-3 mr-1" />
-                                    {anomaly.incidentId}
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            <span className="text-xs text-muted-foreground whitespace-nowrap">
-                              {formatTimeAgo(anomaly.timestamp)}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* LangGraph Agents Tab */}
-        <TabsContent value="langgraph" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <Badge 
-                variant={langGraphAgents?.connected ? "default" : "secondary"}
-                className="gap-1"
-              >
-                <Radio className={cn("h-3 w-3", langGraphAgents?.connected && "animate-pulse")} />
-                {langGraphAgents?.connected ? "Connected" : "Disconnected"}
-              </Badge>
-              <span className="text-sm text-muted-foreground">
-                Framework: <span className="font-mono">{langGraphAgents?.framework || "langgraph"}</span>
-              </span>
-              {langGraphAgents?.activeWorkflows !== undefined && langGraphAgents.activeWorkflows > 0 && (
-                <Badge variant="outline" className="gap-1">
-                  <Activity className="h-3 w-3" />
-                  {langGraphAgents.activeWorkflows} Active Workflow{langGraphAgents.activeWorkflows !== 1 ? 's' : ''}
-                </Badge>
-              )}
-            </div>
-          </div>
-
-          {langGraphLoading ? (
+          {/* Agent Grid */}
+          {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[1, 2, 3, 4].map((i) => (
                 <Skeleton key={i} className="h-64" />
@@ -1011,16 +787,13 @@ export default function AgentsPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {langGraphAgents?.agents?.map((agent) => {
-                const agentIcon = agent.type === "detection" ? <Search className="h-6 w-6" /> :
-                                 agent.type === "rca" ? <Brain className="h-6 w-6" /> :
-                                 agent.type === "remediation" ? <Shield className="h-6 w-6" /> :
-                                 <CheckSquare className="h-6 w-6" />;
+              {filteredAgents.map((agent) => {
+                const config = statusConfig[agent.status];
                 const statusColor = agent.status === "active" ? "bg-status-online" :
                                    agent.status === "idle" ? "bg-muted" : "bg-status-offline";
                 
                 return (
-                  <Card key={agent.id} className="hover-elevate" data-testid={`langgraph-agent-${agent.id}`}>
+                  <Card key={agent.id} className="hover-elevate" data-testid={`agent-card-${agent.id}`}>
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
@@ -1028,7 +801,7 @@ export default function AgentsPage() {
                             "h-12 w-12 rounded-md flex items-center justify-center text-white",
                             agent.status === "active" ? "bg-primary" : "bg-muted-foreground"
                           )}>
-                            {agentIcon}
+                            {getAgentIcon(agent.type)}
                           </div>
                           <div>
                             <CardTitle className="text-base flex items-center gap-2">
@@ -1040,9 +813,13 @@ export default function AgentsPage() {
                                 </Badge>
                               )}
                             </CardTitle>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {agent.framework} / {agent.type}
-                            </p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <Badge variant="secondary" className="text-xs gap-1">
+                                <Layers className="h-3 w-3" />
+                                {agent.framework === "langgraph" ? "LangGraph" : "Orchestrator"}
+                              </Badge>
+                              <span className="text-xs text-muted-foreground">{agent.type}</span>
+                            </div>
                           </div>
                         </div>
                         <Badge 
@@ -1062,25 +839,54 @@ export default function AgentsPage() {
                       <div>
                         <p className="text-xs font-medium text-muted-foreground mb-2">Capabilities</p>
                         <div className="flex flex-wrap gap-1.5">
-                          {agent.capabilities.map((cap) => (
+                          {agent.capabilities.slice(0, 4).map((cap) => (
                             <Badge key={cap.name} variant="outline" className="text-xs">
                               {cap.name.replace(/_/g, ' ')}
                             </Badge>
                           ))}
+                          {agent.capabilities.length > 4 && (
+                            <Badge variant="outline" className="text-xs">
+                              +{agent.capabilities.length - 4} more
+                            </Badge>
+                          )}
                         </div>
                       </div>
                       
-                      <div>
-                        <p className="text-xs font-medium text-muted-foreground mb-2">Tools</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {agent.tools.map((tool) => (
-                            <Badge key={tool} variant="secondary" className="text-xs gap-1">
-                              <Wrench className="h-3 w-3" />
-                              {tool}
-                            </Badge>
-                          ))}
+                      {agent.tools && agent.tools.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-2">Tools</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {agent.tools.map((tool) => (
+                              <Badge key={tool} variant="secondary" className="text-xs gap-1">
+                                <Wrench className="h-3 w-3" />
+                                {tool}
+                              </Badge>
+                            ))}
+                          </div>
                         </div>
-                      </div>
+                      )}
+                      
+                      {/* Operational Metrics */}
+                      {(agent.processedTasks !== undefined || agent.successRate !== undefined) && (
+                        <div className="flex items-center gap-4 pt-2 border-t border-border">
+                          {agent.processedTasks !== undefined && (
+                            <div className="flex items-center gap-1.5">
+                              <Activity className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">
+                                {agent.processedTasks} tasks
+                              </span>
+                            </div>
+                          )}
+                          {agent.successRate !== undefined && (
+                            <div className="flex items-center gap-1.5">
+                              <BarChart3 className="h-3 w-3 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">
+                                {agent.successRate}% success
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 );
@@ -1088,16 +894,11 @@ export default function AgentsPage() {
             </div>
           )}
 
-          {!langGraphAgents?.connected && (
-            <Card className="border-dashed border-2 bg-muted/20">
-              <CardContent className="flex flex-col items-center justify-center py-8 text-center">
-                <AlertCircle className="h-12 w-12 text-muted-foreground mb-4" />
-                <p className="text-sm text-muted-foreground">
-                  Python agent server not connected
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {langGraphAgents?.note || "Start the agent server on port 5001 for live status"}
-                </p>
+          {filteredAgents.length === 0 && !isLoading && (
+            <Card className="border-dashed border-2">
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <Bot className="h-12 w-12 text-muted-foreground mb-4" />
+                <p className="text-sm text-muted-foreground">No agents match the current filter</p>
               </CardContent>
             </Card>
           )}
@@ -1120,7 +921,7 @@ export default function AgentsPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
@@ -1147,6 +948,19 @@ export default function AgentsPage() {
                 </span>
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-offline" />
+                  Disconnected
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-offline">
+                  {toolsHealth?.summary?.disconnected || 0}
+                </span>
+              </CardContent>
+            </Card>
           </div>
 
           {toolsLoading ? (
@@ -1167,11 +981,7 @@ export default function AgentsPage() {
                                 tool.status === "simulated" ? "bg-status-away/10" : "bg-status-offline/10";
                 
                 return (
-                  <Card key={tool.id} className={cn("border-l-4", 
-                    tool.status === "connected" && "border-l-status-online",
-                    tool.status === "simulated" && "border-l-status-away",
-                    tool.status === "disconnected" && "border-l-status-offline"
-                  )} data-testid={`tool-${tool.id}`}>
+                  <Card key={tool.id} data-testid={`tool-${tool.id}`}>
                     <CardContent className="py-4">
                       <div className="flex items-start gap-4">
                         <div className={cn("h-12 w-12 rounded-md flex items-center justify-center", statusBg, statusColor)}>
@@ -1210,6 +1020,227 @@ export default function AgentsPage() {
               })}
             </div>
           )}
+        </TabsContent>
+
+        {/* Telemetry Tab */}
+        <TabsContent value="telemetry" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Devices</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold">{telemetryStats.totalDevices}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-online" />
+                  Healthy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-online">{telemetryStats.healthyDevices}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-away" />
+                  Degraded
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-away">{telemetryStats.degradedDevices}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-busy" />
+                  Critical
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-busy">{telemetryStats.criticalDevices}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Avg CPU</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold">{telemetryStats.avgCpu}%</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Avg Memory</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold">{telemetryStats.avgMemory}%</span>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Gauge className="h-4 w-4" />
+                Device Telemetry
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[400px]">
+                <div className="space-y-2">
+                  {sortedTelemetry.map((device) => {
+                    const statusColor = device.status === "healthy" ? "text-status-online" :
+                                       device.status === "degraded" ? "text-status-away" : "text-status-busy";
+                    const cpuPrev = device.cpuHistory.length > 1 ? device.cpuHistory[device.cpuHistory.length - 2].value : device.cpu;
+                    const memPrev = device.memoryHistory.length > 1 ? device.memoryHistory[device.memoryHistory.length - 2].value : device.memory;
+                    
+                    return (
+                      <div key={device.deviceId} className="flex items-center justify-between p-3 rounded-md bg-muted/30 hover-elevate">
+                        <div className="flex items-center gap-3">
+                          <Server className={cn("h-5 w-5", statusColor)} />
+                          <div>
+                            <p className="font-medium text-sm">{device.deviceName}</p>
+                            <p className="text-xs text-muted-foreground">{device.tier}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div className="text-right">
+                            <p className="text-sm font-medium">CPU: {device.cpu}%</p>
+                            <TrendIndicator current={device.cpu} previous={cpuPrev} />
+                          </div>
+                          <SparkChart data={device.cpuHistory} color="hsl(var(--primary))" />
+                          <div className="text-right">
+                            <p className="text-sm font-medium">Mem: {device.memory}%</p>
+                            <TrendIndicator current={device.memory} previous={memPrev} />
+                          </div>
+                          <SparkChart data={device.memoryHistory} color="hsl(var(--status-away))" />
+                          <Badge variant={device.status === "healthy" ? "default" : "destructive"} className="capitalize">
+                            {device.status}
+                          </Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {sortedTelemetry.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      No telemetry data available
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Anomaly Tab */}
+        <TabsContent value="anomaly" className="flex-1 overflow-auto p-4 space-y-4 mt-0">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Anomalies</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold">{anomalyStats.total}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-busy" />
+                  Critical
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-busy">{anomalyStats.critical}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-orange-500" />
+                  High
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-orange-500">{anomalyStats.high}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-status-away" />
+                  Medium
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold text-status-away">{anomalyStats.medium}</span>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-muted-foreground" />
+                  Low
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <span className="text-2xl font-semibold">{anomalyStats.low}</span>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4" />
+                Recent Anomalies
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[400px]">
+                {anomalyEvents.length > 0 ? (
+                  <div className="space-y-2">
+                    {anomalyEvents.map((anomaly) => {
+                      const severityColor = anomaly.severity === "critical" ? "text-status-busy bg-status-busy/10" :
+                                           anomaly.severity === "high" ? "text-orange-500 bg-orange-500/10" :
+                                           anomaly.severity === "medium" ? "text-status-away bg-status-away/10" : 
+                                           "text-muted-foreground bg-muted";
+                      
+                      return (
+                        <div key={anomaly.id} className={cn("flex items-center justify-between p-3 rounded-md", severityColor)}>
+                          <div className="flex items-center gap-3">
+                            <AlertTriangle className="h-5 w-5" />
+                            <div>
+                              <p className="font-medium text-sm">{anomaly.deviceName}</p>
+                              <p className="text-xs">{anomaly.metric}: {anomaly.value} (threshold: {anomaly.threshold})</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Badge variant="outline" className="capitalize">{anomaly.severity}</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {new Date(anomaly.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <AlertTriangle className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No anomalies detected</p>
+                    <p className="text-xs mt-1">Anomalies will appear here when detected via SSE</p>
+                  </div>
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>
