@@ -45,6 +45,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Device } from "@shared/schema";
 import { AgentInternalLogs } from "@/components/dashboard/agent-internal-logs";
+import { WorkflowStorageAnalysis } from "@/components/dashboard/workflow-storage-analysis";
+import { Database } from "lucide-react";
 
 const faultTypes = [
   { id: "cpu_spike", label: "CPU Spike", description: "Simulate high CPU utilization", tiers: ["endpoint", "tor"] },
@@ -933,10 +935,30 @@ export default function DemoConsolePage() {
     }
   };
 
+  // Map scenario IDs to fault types for LangGraph
+  const scenarioToFaultType: Record<string, string> = {
+    "bgp_link_flap": "bgp_link_flap",
+    "bgp_session_instability": "bgp_session_instability", 
+    "traffic_drop": "traffic_drop"
+  };
+
   const injectFaultMutation = useMutation({
     mutationFn: async (scenario: string) => {
-      const res = await apiRequest("POST", "/api/demo/inject-fault", { scenario });
-      return res.json();
+      // If a device is selected, use the real LangGraph agents
+      if (selectedDeviceInfo) {
+        const faultType = scenarioToFaultType[scenario] || "bgp_link_flap";
+        const res = await apiRequest("POST", "/api/faults/inject-with-healing", { 
+          deviceId: selectedDeviceInfo.id,
+          faultType: faultType,
+          severity: "medium",
+          autoHeal: true
+        });
+        return res.json();
+      } else {
+        // Fallback to simulated demo flow
+        const res = await apiRequest("POST", "/api/demo/inject-fault", { scenario });
+        return res.json();
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/demo/scenario-status"] });
@@ -1207,32 +1229,39 @@ export default function DemoConsolePage() {
             )}
             
             <Tabs defaultValue="timeline" className="w-full">
-              <TabsList className="grid w-full grid-cols-3 mb-4">
+              <TabsList className="grid w-full grid-cols-4 mb-4">
                 <TabsTrigger value="timeline" className="flex items-center gap-1.5" data-testid="tab-timeline">
                   <Activity className="h-4 w-4" />
-                  Event Timeline
+                  <span className="hidden sm:inline">Event</span> Timeline
                 </TabsTrigger>
-                <TabsTrigger value="stages" className="flex items-center gap-1.5" data-testid="tab-stages">
-                  <Target className="h-4 w-4" />
-                  Stage Analysis
+                <TabsTrigger value="storage" className="flex items-center gap-1.5" data-testid="tab-storage">
+                  <Database className="h-4 w-4" />
+                  Storage Analysis
                 </TabsTrigger>
                 <TabsTrigger value="internal-logs" className="flex items-center gap-1.5" data-testid="tab-internal-logs">
                   <FileText className="h-4 w-4" />
-                  Internal Logs
+                  Agent Logs
                   {demoStatus?.internalLogs && demoStatus.internalLogs.length > 0 && (
                     <Badge variant="secondary" className="h-5 text-xs ml-1">
                       {demoStatus.internalLogs.length}
                     </Badge>
                   )}
                 </TabsTrigger>
+                <TabsTrigger value="stages" className="flex items-center gap-1.5" data-testid="tab-stages">
+                  <Target className="h-4 w-4" />
+                  Stage Details
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="timeline" className="mt-0">
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Live Event Timeline</CardTitle>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-primary" />
+                      Live Event Timeline
+                    </CardTitle>
                     <CardDescription>
-                      Real-time events from the agentic framework with detailed metrics
+                      Real-time events from the agentic framework showing the autonomous healing pipeline
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -1241,12 +1270,44 @@ export default function DemoConsolePage() {
                 </Card>
               </TabsContent>
 
+              <TabsContent value="storage" className="mt-0">
+                <WorkflowStorageAnalysis
+                  incidentId={demoStatus?.incidentId || null}
+                  stage={demoStatus?.stage || "idle"}
+                  startedAt={demoStatus?.startedAt || null}
+                  stageDetails={demoStatus?.stageDetails as any || {}}
+                  internalLogs={demoStatus?.internalLogs || []}
+                  deviceId={demoStatus?.deviceId}
+                  faultType={demoStatus?.type}
+                />
+              </TabsContent>
+
+              <TabsContent value="internal-logs" className="mt-0">
+                <Card>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-primary" />
+                      Agent Internal Logs & LLM Communication
+                    </CardTitle>
+                    <CardDescription>
+                      Complete transparency into agent decision-making, tool calls, and reasoning
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <AgentInternalLogs logs={demoStatus?.internalLogs || []} className="border-0 shadow-none" />
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
               <TabsContent value="stages" className="mt-0">
                 <Card>
                   <CardHeader className="pb-3">
-                    <CardTitle className="text-base">Stage Analysis</CardTitle>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Target className="h-4 w-4 text-primary" />
+                      Stage Analysis Details
+                    </CardTitle>
                     <CardDescription>
-                      Detailed breakdown of each autonomous healing phase
+                      Detailed breakdown of each autonomous healing phase with metrics and evidence
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -1267,10 +1328,6 @@ export default function DemoConsolePage() {
                     </ScrollArea>
                   </CardContent>
                 </Card>
-              </TabsContent>
-
-              <TabsContent value="internal-logs" className="mt-0">
-                <AgentInternalLogs logs={demoStatus?.internalLogs || []} />
               </TabsContent>
             </Tabs>
           </div>
