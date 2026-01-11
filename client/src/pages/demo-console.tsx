@@ -47,13 +47,26 @@ import type { Device } from "@shared/schema";
 import { AgentInternalLogs } from "@/components/dashboard/agent-internal-logs";
 
 const faultTypes = [
-  { id: "cpu_spike", label: "CPU Spike", description: "Simulate high CPU utilization" },
-  { id: "memory_exhaustion", label: "Memory Exhaustion", description: "Simulate high memory usage" },
-  { id: "link_flap", label: "Link Flap", description: "Simulate port state oscillation" },
-  { id: "bgp_instability", label: "BGP Instability", description: "Simulate BGP session issues" },
-  { id: "packet_drops", label: "Packet Drops", description: "Simulate high packet drop rate" },
-  { id: "latency_spike", label: "Latency Spike", description: "Simulate increased latency" },
+  { id: "cpu_spike", label: "CPU Spike", description: "Simulate high CPU utilization", tiers: ["endpoint", "tor"] },
+  { id: "memory_exhaustion", label: "Memory Exhaustion", description: "Simulate high memory usage", tiers: ["endpoint", "tor"] },
+  { id: "link_flap", label: "Link Flap", description: "Simulate port state oscillation", tiers: ["core", "spine", "tor"] },
+  { id: "bgp_instability", label: "BGP Instability", description: "Simulate BGP session issues", tiers: ["core", "spine"] },
+  { id: "packet_drops", label: "Packet Drops", description: "Simulate high packet drop rate", tiers: ["tor", "endpoint"] },
+  { id: "latency_spike", label: "Latency Spike", description: "Simulate increased latency", tiers: ["tor", "endpoint"] },
 ];
+
+// Mapping device tiers to recommended scenarios
+const tierToScenarioMap: Record<string, string> = {
+  core: "bgp_link_flap",
+  spine: "bgp_session_instability", 
+  tor: "traffic_drop",
+  endpoint: "traffic_drop",
+};
+
+// Get relevant fault types based on device tier
+function getRelevantFaultTypes(deviceTier: string) {
+  return faultTypes.filter(ft => ft.tiers.includes(deviceTier));
+}
 
 const severityLevels = [
   { id: "low", label: "Low", color: "bg-status-away" },
@@ -188,9 +201,14 @@ interface ActiveFault {
   severity: string;
 }
 
-function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
+interface NodeFaultInjectionPanelProps {
+  devices: Device[];
+  onScenarioRecommendation?: (scenarioId: string | null, deviceInfo: { id: string; name: string; tier: string } | null) => void;
+}
+
+function NodeFaultInjectionPanel({ devices, onScenarioRecommendation }: NodeFaultInjectionPanelProps) {
   const [selectedDevice, setSelectedDevice] = useState<string>("");
-  const [faultType, setFaultType] = useState<string>("cpu_spike");
+  const [faultType, setFaultType] = useState<string>("");
   const [severity, setSeverity] = useState<string>("medium");
   const [duration, setDuration] = useState<string>("");
   const { toast } = useToast();
@@ -200,6 +218,31 @@ function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
     spine: devices.filter(d => d.type === 'spine'),
     tor: devices.filter(d => d.type === 'tor'),
     endpoint: devices.filter(d => d.type === 'endpoint'),
+  };
+
+  // Get the selected device info and relevant fault types
+  const selectedDeviceInfo = devices.find(d => d.id === selectedDevice);
+  const deviceTier = selectedDeviceInfo?.type || "";
+  const relevantFaultTypes = deviceTier ? getRelevantFaultTypes(deviceTier) : faultTypes;
+  
+  // Update fault type and notify parent when device selection changes
+  const handleDeviceChange = (deviceId: string) => {
+    setSelectedDevice(deviceId);
+    const device = devices.find(d => d.id === deviceId);
+    if (device) {
+      const tier = device.type || "";
+      const relevantFaults = getRelevantFaultTypes(tier);
+      // Auto-select first relevant fault type
+      if (relevantFaults.length > 0) {
+        setFaultType(relevantFaults[0].id);
+      }
+      // Notify parent of recommended scenario
+      const recommendedScenario = tierToScenarioMap[tier] || null;
+      onScenarioRecommendation?.(recommendedScenario, { id: device.id, name: device.name, tier });
+    } else {
+      setFaultType("");
+      onScenarioRecommendation?.(null, null);
+    }
   };
 
   const { data: activeFaults = [], refetch: refetchFaults } = useQuery<ActiveFault[]>({
@@ -256,7 +299,6 @@ function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
     },
   });
 
-  const selectedDeviceInfo = devices.find(d => d.id === selectedDevice);
   const selectedDeviceHasFault = activeFaults.some(f => f.deviceId === selectedDevice);
 
   return (
@@ -276,7 +318,7 @@ function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="space-y-2">
             <Label htmlFor="device-select">Target Device</Label>
-            <Select value={selectedDevice} onValueChange={setSelectedDevice}>
+            <Select value={selectedDevice} onValueChange={handleDeviceChange}>
               <SelectTrigger id="device-select" data-testid="select-fault-device">
                 <SelectValue placeholder="Select a device" />
               </SelectTrigger>
@@ -303,15 +345,18 @@ function NodeFaultInjectionPanel({ devices }: { devices: Device[] }) {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="fault-type-select">Fault Type</Label>
-            <Select value={faultType} onValueChange={setFaultType}>
+            <Label htmlFor="fault-type-select">Fault Type {deviceTier && <span className="text-xs text-muted-foreground">({relevantFaultTypes.length} relevant)</span>}</Label>
+            <Select value={faultType} onValueChange={setFaultType} disabled={!selectedDevice}>
               <SelectTrigger id="fault-type-select" data-testid="select-fault-type">
-                <SelectValue />
+                <SelectValue placeholder="Select device first" />
               </SelectTrigger>
               <SelectContent>
-                {faultTypes.map(ft => (
+                {relevantFaultTypes.map(ft => (
                   <SelectItem key={ft.id} value={ft.id}>
-                    {ft.label}
+                    <div className="flex flex-col">
+                      <span>{ft.label}</span>
+                      <span className="text-xs text-muted-foreground">{ft.description}</span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -862,6 +907,9 @@ function StageDetailsPanel({ stageDetails, currentStage }: { stageDetails: Stage
 
 export default function DemoConsolePage() {
   const [selectedScenario, setSelectedScenario] = useState<string | null>(null);
+  const [recommendedScenario, setRecommendedScenario] = useState<string | null>(null);
+  const [selectedDeviceInfo, setSelectedDeviceInfo] = useState<{ id: string; name: string; tier: string } | null>(null);
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
   const { data: demoStatus, refetch: refetchStatus } = useQuery<DemoScenarioStatus>({
     queryKey: ["/api/demo/scenario-status"],
@@ -871,6 +919,19 @@ export default function DemoConsolePage() {
   const { data: devices } = useQuery<Device[]>({
     queryKey: ["/api/devices"],
   });
+  
+  // Handle scenario recommendation from NodeFaultInjectionPanel
+  const handleScenarioRecommendation = (scenarioId: string | null, deviceInfo: { id: string; name: string; tier: string } | null) => {
+    setRecommendedScenario(scenarioId);
+    setSelectedDeviceInfo(deviceInfo);
+    if (scenarioId) {
+      setSelectedScenario(scenarioId);
+      setAwaitingConfirmation(true);
+    } else {
+      setSelectedScenario(null);
+      setAwaitingConfirmation(false);
+    }
+  };
 
   const injectFaultMutation = useMutation({
     mutationFn: async (scenario: string) => {
@@ -902,9 +963,42 @@ export default function DemoConsolePage() {
     }
   }, [demoStatus?.active, refetchStatus]);
 
+  // Direct start for manual scenario selection (no device recommendation)
   const handleStartScenario = (scenarioId: string) => {
-    setSelectedScenario(scenarioId);
-    injectFaultMutation.mutate(scenarioId);
+    // Only allow direct start if no device is selected (no recommendation flow)
+    if (!recommendedScenario) {
+      setSelectedScenario(scenarioId);
+      setAwaitingConfirmation(false);
+      injectFaultMutation.mutate(scenarioId);
+    }
+    // If clicking on the recommended scenario but confirmation was cancelled, re-enable confirmation
+    else if (scenarioId === recommendedScenario && !awaitingConfirmation) {
+      setSelectedScenario(scenarioId);
+      setAwaitingConfirmation(true);
+    }
+    // If recommendation exists but user clicks different scenario, reset and start that one
+    else if (scenarioId !== recommendedScenario) {
+      setRecommendedScenario(null);
+      setSelectedDeviceInfo(null);
+      setAwaitingConfirmation(false);
+      setSelectedScenario(scenarioId);
+      injectFaultMutation.mutate(scenarioId);
+    }
+  };
+  
+  // Confirm start for recommendation-based scenario selection
+  const handleConfirmStart = () => {
+    if (selectedScenario) {
+      setAwaitingConfirmation(false);
+      injectFaultMutation.mutate(selectedScenario);
+    }
+  };
+  
+  // Cancel confirmation but keep device selection intact
+  const handleCancelConfirmation = () => {
+    setAwaitingConfirmation(false);
+    setSelectedScenario(null);
+    // Keep recommendation state so user can click the recommended scenario again
   };
 
   const isRunning = demoStatus?.active && demoStatus.stage !== "resolved";
@@ -946,28 +1040,40 @@ export default function DemoConsolePage() {
 
       <div className="flex-1 overflow-auto p-4">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-          {scenarios.map((scenario) => (
+          {scenarios.map((scenario) => {
+            const isRecommended = recommendedScenario === scenario.id;
+            const isSelected = selectedScenario === scenario.id;
+            const showConfirmation = awaitingConfirmation && isSelected && isRecommended;
+            
+            return (
             <Card 
               key={scenario.id}
               className={cn(
-                "transition-all cursor-pointer",
-                selectedScenario === scenario.id && "ring-2 ring-primary",
-                isRunning && selectedScenario !== scenario.id && "opacity-50 pointer-events-none"
+                "transition-all",
+                isSelected && "ring-2 ring-primary",
+                isRecommended && !isSelected && "ring-2 ring-orange-500 ring-offset-2",
+                isRunning && !isSelected && "opacity-50 pointer-events-none",
+                !isRunning && !awaitingConfirmation && "cursor-pointer"
               )}
-              onClick={() => !isRunning && setSelectedScenario(scenario.id)}
+              onClick={() => !isRunning && !awaitingConfirmation && setSelectedScenario(scenario.id)}
             >
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-3">
                   <div className={cn(
                     "h-10 w-10 rounded-md flex items-center justify-center",
-                    scenario.id === "link_failure" && "bg-status-busy/10 text-status-busy",
-                    scenario.id === "port_congestion" && "bg-status-away/10 text-status-away",
-                    scenario.id === "dpu_overload" && "bg-primary/10 text-primary"
+                    scenario.id === "bgp_link_flap" && "bg-status-busy/10 text-status-busy",
+                    scenario.id === "bgp_session_instability" && "bg-status-away/10 text-status-away",
+                    scenario.id === "traffic_drop" && "bg-primary/10 text-primary"
                   )}>
                     {scenario.icon}
                   </div>
-                  <div>
-                    <CardTitle className="text-base">{scenario.title}</CardTitle>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-base">{scenario.title}</CardTitle>
+                      {isRecommended && (
+                        <Badge className="bg-orange-500 text-white text-xs">Recommended</Badge>
+                      )}
+                    </div>
                     <CardDescription className="text-xs mt-0.5">
                       Duration: {scenario.expectedDuration}
                     </CardDescription>
@@ -983,9 +1089,50 @@ export default function DemoConsolePage() {
                     </Badge>
                   ))}
                 </div>
+                
+                {showConfirmation ? (
+                  <div className="space-y-3">
+                    <div className="p-3 bg-orange-500/10 rounded-md border border-orange-500/30">
+                      <p className="text-sm font-medium text-orange-600 dark:text-orange-400 mb-1">
+                        Ready to Start Scenario
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Target: <strong>{selectedDeviceInfo?.name}</strong> ({selectedDeviceInfo?.tier})
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        className="flex-1 gap-1.5 bg-orange-500 hover:bg-orange-600"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleConfirmStart();
+                        }}
+                        disabled={injectFaultMutation.isPending}
+                        data-testid="button-confirm-start"
+                      >
+                        {injectFaultMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Zap className="h-4 w-4" />
+                        )}
+                        Start Scenario
+                      </Button>
+                      <Button 
+                        variant="outline"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleCancelConfirmation();
+                        }}
+                        data-testid="button-cancel-start"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
                 <Button 
                   className="w-full gap-1.5"
-                  disabled={isRunning || injectFaultMutation.isPending}
+                  disabled={isRunning || injectFaultMutation.isPending || (awaitingConfirmation && isRecommended)}
                   onClick={(e) => {
                     e.stopPropagation();
                     handleStartScenario(scenario.id);
@@ -999,14 +1146,19 @@ export default function DemoConsolePage() {
                   )}
                   Start Scenario
                 </Button>
+                )}
               </CardContent>
             </Card>
-          ))}
+          );
+          })}
         </div>
 
         {devices && devices.length > 0 && (
           <div className="mb-4">
-            <NodeFaultInjectionPanel devices={devices} />
+            <NodeFaultInjectionPanel 
+              devices={devices} 
+              onScenarioRecommendation={handleScenarioRecommendation}
+            />
           </div>
         )}
 
