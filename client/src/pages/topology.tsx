@@ -22,7 +22,7 @@ export default function TopologyPage() {
   const coreDevices = devices?.filter(d => d.type === "core") || [];
   const spineDevices = devices?.filter(d => d.type === "spine") || [];
   const torDevices = devices?.filter(d => d.type === "tor") || [];
-  const dpuDevices = devices?.filter(d => d.type === "dpu") || [];
+  const endpointDevices = devices?.filter(d => d.type === "endpoint") || [];
 
   return (
     <div className="flex flex-col h-full">
@@ -140,9 +140,9 @@ export default function TopologyPage() {
                 <div className="w-px h-8 bg-border" />
 
                 <div className="flex flex-col items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">DPU Layer</span>
-                  <div className="flex items-center gap-1.5 flex-wrap justify-center max-w-2xl">
-                    {dpuDevices.map((device) => (
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Endpoint Layer</span>
+                  <div className="flex items-center gap-1.5 flex-wrap justify-center max-w-3xl">
+                    {endpointDevices.map((device) => (
                       <div
                         key={device.id}
                         className={cn(

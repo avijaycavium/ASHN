@@ -19,6 +19,8 @@ import {
 } from "./prometheus-integration";
 import { injectFault, clearFault, hasFault, getFault, formatPrometheusMetrics, generateAllDeviceMetrics } from "./telemetry-exporter";
 import { generate52DeviceTopology } from "./topology-generator";
+import { processNLQuery, getQuerySuggestions } from "./nl-query-service";
+import { detectionAgent } from "./detection-agent";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -370,6 +372,35 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/nl-query", async (req, res) => {
+    try {
+      const { query } = req.body;
+      if (!query) {
+        return res.status(400).json({ error: "Query is required" });
+      }
+
+      const result = await processNLQuery(query);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Query processing failed",
+      });
+    }
+  });
+
+  app.get("/api/nl-query/suggestions", async (req, res) => {
+    try {
+      const suggestions = await getQuerySuggestions();
+      res.json({ suggestions });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get suggestions",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   app.get("/api/gns3/templates", async (req, res) => {
     try {
       const client = getGNS3Client();
@@ -508,6 +539,42 @@ export async function registerRoutes(
     } catch (error) {
       res.status(500).json({
         error: "Failed to trigger analysis",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/detection/status", async (req, res) => {
+    try {
+      const status = detectionAgent.getStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get detection agent status",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/detection/start", async (req, res) => {
+    try {
+      detectionAgent.start();
+      res.json({ success: true, message: "Detection agent started" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to start detection agent",
+        details: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/detection/stop", async (req, res) => {
+    try {
+      detectionAgent.stop();
+      res.json({ success: true, message: "Detection agent stopped" });
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to stop detection agent",
         details: error instanceof Error ? error.message : "Unknown error",
       });
     }

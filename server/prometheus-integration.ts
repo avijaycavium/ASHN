@@ -66,9 +66,9 @@ async function queryPrometheusRange(query: string, start: number, end: number, s
   }
 }
 
-export function updateMetricsCache(devices: Device[]): void {
+export function updateMetricsCache(devices: Device[], forceRefresh: boolean = false): void {
   const now = Date.now();
-  if (now - lastUpdate < CACHE_TTL) return;
+  if (!forceRefresh && now - lastUpdate < CACHE_TTL) return;
 
   const allMetrics = generateAllDeviceMetrics(devices);
   cachedMetrics.clear();

@@ -966,6 +966,19 @@ export class MemStorage implements IStorage {
     return this.incidents.find((i) => i.id === id);
   }
 
+  async addIncident(incident: Incident): Promise<Incident> {
+    this.incidents.push(incident);
+    return incident;
+  }
+
+  async updateIncident(id: string, updates: Partial<Incident>): Promise<Incident | undefined> {
+    const index = this.incidents.findIndex((i) => i.id === id);
+    if (index === -1) return undefined;
+    
+    this.incidents[index] = { ...this.incidents[index], ...updates, updatedAt: new Date().toISOString() };
+    return this.incidents[index];
+  }
+
   async getIncidentTimeline(incidentId: string): Promise<TimelineEvent[]> {
     return generateTimeline(incidentId);
   }
