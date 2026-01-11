@@ -49,75 +49,110 @@ export interface IStorage {
 function generateMockDevices(): Device[] {
   const devices: Device[] = [];
   
+  // Cloud-Host (Prometheus, Grafana, LangGraph Agents)
   devices.push({
-    id: "core-1",
-    name: "Core-1",
+    id: "cloud-host",
+    name: "Cloud-Host",
     type: "core",
     status: "healthy",
-    location: "DC-1",
-    cpu: 35,
-    memory: 45,
-    uptime: "45d 12h",
-    ipAddress: "10.0.0.1",
-    ports: 48,
-    activePorts: 42,
+    location: "Management",
+    cpu: 25,
+    memory: 40,
+    uptime: "90d 8h",
+    ipAddress: "192.168.100.1",
+    ports: 4,
+    activePorts: 2,
   });
   
-  for (let i = 1; i <= 7; i++) {
-    const status = i === 3 ? "degraded" : "healthy";
-    devices.push({
-      id: `spine-${i}`,
-      name: `Spine-${i}`,
-      type: "spine",
-      status,
-      location: `DC-1-Rack-${i}`,
-      cpu: 25 + Math.floor(Math.random() * 30),
-      memory: 30 + Math.floor(Math.random() * 30),
-      uptime: `${30 + i}d ${Math.floor(Math.random() * 24)}h`,
-      ipAddress: `10.0.1.${i}`,
-      ports: 32,
-      activePorts: 28 + Math.floor(Math.random() * 4),
-    });
-  }
+  // MGMT-SW (L2 Ethernet Switch)
+  devices.push({
+    id: "mgmt-sw",
+    name: "MGMT-SW",
+    type: "spine",
+    status: "healthy",
+    location: "Management",
+    cpu: 15,
+    memory: 25,
+    uptime: "90d 8h",
+    ipAddress: "192.168.100.254",
+    ports: 8,
+    activePorts: 6,
+  });
   
-  for (let i = 1; i <= 7; i++) {
-    const status = i === 1 ? "critical" : "healthy";
-    devices.push({
-      id: `tor-${i}`,
-      name: `TOR-${i}`,
-      type: "tor",
-      status,
-      location: `DC-1-Rack-${i}`,
-      cpu: 20 + Math.floor(Math.random() * 40),
-      memory: 25 + Math.floor(Math.random() * 40),
-      uptime: `${20 + i}d ${Math.floor(Math.random() * 24)}h`,
-      ipAddress: `10.0.2.${i}`,
-      ports: 24,
-      activePorts: 18 + Math.floor(Math.random() * 6),
-    });
-  }
+  // Switch-A1 (AS 65101, DPU-1 facing) - PRIMARY FLAP TEST SWITCH
+  devices.push({
+    id: "switch-a1",
+    name: "Switch-A1",
+    type: "tor",
+    status: "degraded", // Currently experiencing flap
+    location: "BGP Fabric",
+    cpu: 45,
+    memory: 52,
+    uptime: "45d 12h",
+    ipAddress: "192.168.100.21",
+    ports: 4,
+    activePorts: 3,
+  });
   
-  for (let i = 1; i <= 35; i++) {
-    const rand = Math.random();
-    let status: Device["status"] = "healthy";
-    if (rand > 0.95) status = "critical";
-    else if (rand > 0.9) status = "degraded";
-    else if (rand > 0.85) status = "offline";
-    
-    devices.push({
-      id: `dpu-${i}`,
-      name: `DPU-${i}`,
-      type: "dpu",
-      status,
-      location: `DC-1-Rack-${Math.ceil(i / 5)}`,
-      cpu: 15 + Math.floor(Math.random() * 50),
-      memory: 20 + Math.floor(Math.random() * 50),
-      uptime: `${10 + i}d ${Math.floor(Math.random() * 24)}h`,
-      ipAddress: `10.0.3.${i}`,
-      ports: 4,
-      activePorts: 2 + Math.floor(Math.random() * 2),
-    });
-  }
+  // Switch-B (AS 65102, Transit/Spine)
+  devices.push({
+    id: "switch-b",
+    name: "Switch-B",
+    type: "spine",
+    status: "healthy",
+    location: "BGP Fabric",
+    cpu: 28,
+    memory: 35,
+    uptime: "45d 12h",
+    ipAddress: "192.168.100.22",
+    ports: 4,
+    activePorts: 3,
+  });
+  
+  // Switch-C (AS 65103, DPU-2 facing)
+  devices.push({
+    id: "switch-c",
+    name: "Switch-C",
+    type: "tor",
+    status: "healthy",
+    location: "BGP Fabric",
+    cpu: 32,
+    memory: 38,
+    uptime: "45d 12h",
+    ipAddress: "192.168.100.23",
+    ports: 4,
+    activePorts: 4,
+  });
+  
+  // DPU-1 (Ubuntu, Data plane endpoint)
+  devices.push({
+    id: "dpu-1",
+    name: "DPU-1",
+    type: "dpu",
+    status: "healthy",
+    location: "Data Plane",
+    cpu: 22,
+    memory: 30,
+    uptime: "30d 6h",
+    ipAddress: "10.0.1.10",
+    ports: 2,
+    activePorts: 2,
+  });
+  
+  // DPU-2 (Ubuntu, Data plane endpoint)
+  devices.push({
+    id: "dpu-2",
+    name: "DPU-2",
+    type: "dpu",
+    status: "healthy",
+    location: "Data Plane",
+    cpu: 18,
+    memory: 28,
+    uptime: "30d 6h",
+    ipAddress: "10.0.4.10",
+    ports: 2,
+    activePorts: 2,
+  });
   
   return devices;
 }
@@ -127,96 +162,96 @@ function generateIncidents(): Incident[] {
   
   return [
     {
-      id: "INC-2025-001",
-      title: "Link Failure - Switch-A to Switch-B",
-      description: "Physical link failure detected between Switch-A:port1 and Switch-B:port2. Cable fault or transceiver failure suspected. Automatic traffic rerouting initiated.",
+      id: "INC-2026-001",
+      title: "BGP Link Flap - Switch-A1 to Switch-C (Primary Path)",
+      description: "Rapid port state oscillations detected on Switch-A1:port2 (A1-C primary link). 6 state transitions in 2 minutes. BGP session to peer 10.0.13.2 (Switch-C, AS 65103) unstable. Traffic rerouting via Switch-B backup path initiated.",
       severity: "critical",
       status: "remediating",
       ttd: 25,
       ttr: 55,
       tttr: null,
-      affectedDevices: ["spine-1", "spine-2", "tor-1", "tor-2", "tor-3", "dpu-1", "dpu-2", "dpu-3", "dpu-4", "dpu-5", "dpu-6", "dpu-7", "dpu-8", "dpu-9", "dpu-10"],
-      rootCause: "Link failure between Switch-A:port1 and Switch-B:port2. Physical layer issue detected via link state monitoring. 15 downstream devices affected. OSPF/BGP auto-convergence in progress.",
+      affectedDevices: ["switch-a1", "switch-c", "dpu-1", "dpu-2"],
+      rootCause: "Link flap detected on Switch-A1:port2 (10.0.13.1/30). Evidence: 6 port state changes in 2min, BGP updates spike (5+ resets), CRC/FCS errors detected. Suspected transceiver degradation or cable connector issue. Primary path DPU-1 → A1 → C → DPU-2 affected. Backup path via Switch-B (10.0.12.0/30) available.",
       confidence: 95,
       createdAt: new Date(now.getTime() - 5 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 2 * 60000).toISOString(),
       resolvedAt: null,
     },
     {
-      id: "INC-2025-002",
-      title: "Port Congestion - TOR-3 Uplink",
-      description: "Queue depth 85% (baseline <15%), latency 250ms, packet drops detected on TOR-3 uplink ports. QoS remediation in progress.",
+      id: "INC-2026-002",
+      title: "BGP Session Instability - Switch-A1 Peer 10.0.13.2",
+      description: "BGP peer state oscillating (1→0→1→0). switch_bgp_updates_received spike detected (5+ in 2min). BGP weight adjustment to backup peer in progress.",
       severity: "high",
       status: "remediating",
-      ttd: 90,
-      ttr: 55,
+      ttd: 30,
+      ttr: 45,
       tttr: null,
-      affectedDevices: ["tor-3", "dpu-11", "dpu-12", "dpu-13", "dpu-14"],
-      rootCause: "Port congestion due to traffic surge. Queue depth 85% + latency 250ms + packet drops confirmed. Applying QoS buffer threshold adjustment and priority traffic policy.",
-      confidence: 89,
+      affectedDevices: ["switch-a1", "switch-c"],
+      rootCause: "BGP session instability caused by underlying link flap on port2 (10.0.13.0/30). Primary peer weight 200 reduced to 50 to prefer backup peer 10.0.12.2 (Switch-B) with weight 100. Traffic shifting to backup path A1 → B → C.",
+      confidence: 92,
       createdAt: new Date(now.getTime() - 10 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 3 * 60000).toISOString(),
       resolvedAt: null,
     },
     {
-      id: "INC-2025-003",
-      title: "DPU Resource Exhaustion - DPU-5",
-      description: "CPU saturation at 95% (baseline <70%), latency spike 250ms (baseline <100ms). Workload migration to DPU-8 initiated.",
+      id: "INC-2026-003",
+      title: "Traffic Drop - Primary Path A1-C",
+      description: "switch_port_bytes_in on Switch-A1:port2 dropped from 1.2 MB/s to <10 bytes/s. End-to-end latency increased from 300µs to 600µs via backup path.",
       severity: "high",
       status: "remediating",
-      ttd: 100,
-      ttr: 110,
+      ttd: 28,
+      ttr: 60,
       tttr: null,
-      affectedDevices: ["dpu-5", "dpu-8"],
-      rootCause: "DPU-5 workload imbalance causing CPU saturation and memory pressure. Target DPU-8 identified with available capacity. Live migration strategy selected.",
-      confidence: 85,
+      affectedDevices: ["switch-a1", "switch-b", "switch-c", "dpu-1", "dpu-2"],
+      rootCause: "Primary link instability causing traffic drop. Backup path A1 → B → C → DPU-2 now active. Latency increase acceptable (+1 hop). Monitoring for stability.",
+      confidence: 90,
       createdAt: new Date(now.getTime() - 8 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 4 * 60000).toISOString(),
       resolvedAt: null,
     },
     {
-      id: "INC-2025-004",
-      title: "Link Failure Recovery - Spine-2 to TOR-4",
-      description: "Link failure between Spine-2:port3 and TOR-4:port1 successfully remediated. Traffic rerouted via alternate path.",
+      id: "INC-2026-004",
+      title: "Link Flap Recovery Complete - Switch-A1 Port2 Shutdown",
+      description: "Primary link A1-C administratively shutdown after 10+ flaps in 5min. Traffic successfully rerouted via Switch-B. BGP convergence completed in 45 seconds.",
       severity: "critical",
       status: "resolved",
       ttd: 28,
       ttr: 58,
       tttr: 115,
-      affectedDevices: ["spine-2", "tor-4", "dpu-15", "dpu-16", "dpu-17", "dpu-18"],
-      rootCause: "Link failure detected via interface down event. Alternate path identified through Spine-1. OSPF reconvergence completed in 45 seconds. Zero packet loss after convergence.",
+      affectedDevices: ["switch-a1", "switch-b", "switch-c", "dpu-1", "dpu-2"],
+      rootCause: "Excessive link flaps (>10 in 5min) on A1:port2. Remediation: Port shutdown via 'vtysh -c interface port2 shutdown'. BGP reconverged to backup path via 10.0.12.2 (Switch-B). E2E verification: ping 10.0.4.10 - 0% loss, latency ~600µs (acceptable). Flap cessation confirmed.",
       confidence: 98,
       createdAt: new Date(now.getTime() - 2 * 60 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 60 * 60000).toISOString(),
       resolvedAt: new Date(now.getTime() - 60 * 60000).toISOString(),
     },
     {
-      id: "INC-2025-005",
-      title: "QoS Remediation Complete - TOR-2",
-      description: "Port congestion on TOR-2 resolved. Queue depth normalized from 82% to 12%, latency reduced from 230ms to 45ms.",
+      id: "INC-2026-005",
+      title: "BGP Weight Remediation Complete - Backup Path Active",
+      description: "Switch-A1 neighbor 10.0.13.2 weight reduced from 200 to 50. Backup peer 10.0.12.2 (weight 100) now preferred. Traffic flowing via A1 → B → C.",
       severity: "high",
       status: "closed",
-      ttd: 105,
+      ttd: 25,
       ttr: 50,
-      tttr: 175,
-      affectedDevices: ["tor-2", "dpu-6", "dpu-7", "dpu-8"],
-      rootCause: "Traffic surge caused queue overflow. QoS buffer thresholds increased by 20%. Priority traffic policy applied. Packet loss reduced from 5% to <0.1%.",
-      confidence: 92,
+      tttr: 120,
+      affectedDevices: ["switch-a1", "switch-b", "switch-c"],
+      rootCause: "Moderate flap severity (5-10 flaps in 5min). BGP reweight applied: neighbor 10.0.13.2 weight 50 (was 200). Backup path now active. Primary link remains up for monitoring/recovery. switch_port_bytes_out on A1:port3 confirmed increasing.",
+      confidence: 94,
       createdAt: new Date(now.getTime() - 4 * 60 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
       resolvedAt: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
     },
     {
-      id: "INC-2025-006",
-      title: "DPU Workload Migration Complete - DPU-12",
-      description: "Workload migrated from DPU-12 to DPU-15. CPU normalized from 94% to 62%, latency recovered from 245ms to 78ms.",
-      severity: "high",
+      id: "INC-2026-006",
+      title: "BGP Timer Adjustment - Link Stabilization",
+      description: "BGP hold timer increased from 15s to 180s for neighbor 10.0.13.2. Link stabilizing, flaps reduced. Traffic maintained on primary path.",
+      severity: "medium",
       status: "closed",
-      ttd: 95,
-      ttr: 118,
-      tttr: 285,
-      affectedDevices: ["dpu-12", "dpu-15"],
-      rootCause: "DPU-12 resource exhaustion detected. Container workload successfully migrated to DPU-15. Offload rules adjusted for optimal distribution. No service disruption during migration.",
+      ttd: 20,
+      ttr: 45,
+      tttr: 90,
+      affectedDevices: ["switch-a1", "switch-c"],
+      rootCause: "Minor flap severity (<5 flaps in 5min). BGP timers tuned: neighbor 10.0.13.2 timers 60 180 (was 5 15). BGP now tolerates brief flaps without resetting. Link stabilized, no further state changes in 5min window. E2E SLA maintained.",
       confidence: 88,
       createdAt: new Date(now.getTime() - 6 * 60 * 60000).toISOString(),
       updatedAt: new Date(now.getTime() - 5 * 60 * 60000).toISOString(),
@@ -354,62 +389,62 @@ function generateAuditEntries(): AuditEntry[] {
       timestamp: new Date(now.getTime() - 5 * 60000).toISOString(),
       action: "Incident Created",
       user: "System",
-      target: "INC-2025-001",
-      details: "Auto-generated incident for link failure detection on Spine-1:port1",
+      target: "INC-2026-001",
+      details: "Auto-generated incident for BGP link flap detection on Switch-A1:port2",
       status: "success",
     },
     {
       id: "audit-002",
       timestamp: new Date(now.getTime() - 4.5 * 60000).toISOString(),
-      action: "RCA Initiated",
-      user: "RCA Agent",
-      target: "INC-2025-001",
-      details: "Starting root cause analysis with confidence threshold 90%",
+      action: "PromQL Rule Triggered",
+      user: "Telemetry Agent",
+      target: "Switch-A1",
+      details: "changes(switch_port_oper_status[2m]) >= 3 - Port flapping detected",
       status: "success",
     },
     {
       id: "audit-003",
       timestamp: new Date(now.getTime() - 4 * 60000).toISOString(),
-      action: "Remediation Proposed",
-      user: "Remediation Agent",
-      target: "INC-2025-001",
-      details: "Proposed BGP convergence and traffic rerouting through alternate paths",
+      action: "RCA Initiated",
+      user: "RCA Agent",
+      target: "INC-2026-001",
+      details: "Analyzing link flap between A1:port2 (10.0.13.1/30) and C:port2 (10.0.13.2/30)",
       status: "success",
     },
     {
       id: "audit-004",
       timestamp: new Date(now.getTime() - 3 * 60000).toISOString(),
-      action: "Policy Check",
-      user: "Compliance Agent",
-      target: "INC-2025-001",
-      details: "Remediation plan validated against network policies",
+      action: "Remediation Proposed",
+      user: "Remediation Agent",
+      target: "INC-2026-001",
+      details: "Proposed port shutdown and traffic reroute via Switch-B backup path",
       status: "success",
     },
     {
       id: "audit-005",
       timestamp: new Date(now.getTime() - 2 * 60000).toISOString(),
-      action: "Remediation Started",
+      action: "Port Shutdown Executed",
       user: "Execution Agent",
-      target: "INC-2025-001",
-      details: "Executing approved remediation steps",
-      status: "pending",
+      target: "Switch-A1:port2",
+      details: "vtysh -c 'interface port2' -c 'shutdown' executed successfully",
+      status: "success",
     },
     {
       id: "audit-006",
-      timestamp: new Date(now.getTime() - 30 * 60000).toISOString(),
-      action: "Anomaly Detected",
-      user: "Anomaly Agent",
-      target: "TOR-3",
-      details: "Traffic congestion anomaly detected on uplink ports",
-      status: "success",
+      timestamp: new Date(now.getTime() - 1.5 * 60000).toISOString(),
+      action: "BGP Convergence Started",
+      user: "System",
+      target: "Switch-A1",
+      details: "BGP reconverging to backup peer 10.0.12.2 (Switch-B)",
+      status: "pending",
     },
     {
       id: "audit-007",
       timestamp: new Date(now.getTime() - 60 * 60000).toISOString(),
       action: "Incident Resolved",
       user: "Verification Agent",
-      target: "INC-2025-003",
-      details: "BGP session stability confirmed. All metrics within normal range.",
+      target: "INC-2026-004",
+      details: "BGP convergence completed. E2E ping 10.0.4.10 - 0% loss. Flap cessation confirmed.",
       status: "success",
     },
     {
@@ -417,8 +452,8 @@ function generateAuditEntries(): AuditEntry[] {
       timestamp: new Date(now.getTime() - 2 * 60 * 60000).toISOString(),
       action: "Baseline Updated",
       user: "Learning Agent",
-      target: "SNR Threshold",
-      details: "Updated SNR baseline for DPU cluster based on recent patterns",
+      target: "BGP Flap Detection",
+      details: "Updated flap detection threshold based on Prestera transceiver patterns",
       status: "success",
     },
     {
@@ -426,18 +461,18 @@ function generateAuditEntries(): AuditEntry[] {
       timestamp: new Date(now.getTime() - 3 * 60 * 60000).toISOString(),
       action: "Config Backup",
       user: "System",
-      target: "All Devices",
-      details: "Automated configuration backup completed for 50 devices",
+      target: "BGP Fabric",
+      details: "Automated FRR configuration backup for Switch-A1, Switch-B, Switch-C",
       status: "success",
     },
     {
       id: "audit-010",
       timestamp: new Date(now.getTime() - 4 * 60 * 60000).toISOString(),
-      action: "Health Check Failed",
+      action: "Prometheus Scrape",
       user: "Telemetry Agent",
-      target: "DPU-25",
-      details: "Failed to collect metrics due to timeout",
-      status: "failure",
+      target: "All Switches",
+      details: "SONiC metrics collection: 50+ metrics from 192.168.100.21-23:9090",
+      status: "success",
     },
   ];
 }
@@ -471,82 +506,83 @@ function generateTimeline(incidentId: string): TimelineEvent[] {
   const now = new Date();
   const baseTime = now.getTime() - 5 * 60000;
   
-  if (incidentId === "INC-2025-001") {
+  // BGP Link Flap - Primary Incident (Active)
+  if (incidentId === "INC-2026-001") {
     return [
-      { id: "tl-001", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Link Down Detected", agent: "Telemetry Agent", details: "Interface state changed to down on Switch-A:port1" },
-      { id: "tl-002", incidentId, timestamp: new Date(baseTime + 5000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "link_down event detected with 100% confidence" },
-      { id: "tl-003", incidentId, timestamp: new Date(baseTime + 10000).toISOString(), event: "Alert Created", agent: "System", details: "link_failure alert generated" },
-      { id: "tl-004", incidentId, timestamp: new Date(baseTime + 15000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing link failure between Switch-A:port1 and Switch-B:port2" },
-      { id: "tl-005", incidentId, timestamp: new Date(baseTime + 25000).toISOString(), event: "Impact Computed", agent: "Topology Agent", details: "15 downstream devices affected by link failure" },
-      { id: "tl-006", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Root cause confirmed with 95% confidence" },
-      { id: "tl-007", incidentId, timestamp: new Date(baseTime + 35000).toISOString(), event: "Alternate Path Found", agent: "Remediation Agent", details: "Alternate route via Spine-2 identified using topology.resolve" },
-      { id: "tl-008", incidentId, timestamp: new Date(baseTime + 40000).toISOString(), event: "Remediation Started", agent: "Remediation Agent", details: "Enabling alternate route - OSPF/BGP auto-converging" },
-      { id: "tl-009", incidentId, timestamp: new Date(baseTime + 55000).toISOString(), event: "Routing Converged", agent: "Verification Agent", details: "OSPF/BGP convergence completed in 30-60 seconds" },
+      { id: "tl-001", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Port Flap Detected", agent: "Telemetry Agent", details: "switch_port_oper_status{device='Switch-A1',port='port2'} toggling 1→0→1→0. 3 state changes in 2min detected." },
+      { id: "tl-002", incidentId, timestamp: new Date(baseTime + 10000).toISOString(), event: "PromQL Rule Triggered", agent: "Telemetry Agent", details: "changes(switch_port_oper_status[2m]) >= 3 - THRESHOLD CROSSED. Confidence: 98%" },
+      { id: "tl-003", incidentId, timestamp: new Date(baseTime + 15000).toISOString(), event: "BGP Instability Correlated", agent: "Anomaly Agent", details: "switch_bgp_peer_state{peer_ip='10.0.13.2'} = 0, switch_bgp_updates_received spike (5+ in 2min)" },
+      { id: "tl-004", incidentId, timestamp: new Date(baseTime + 20000).toISOString(), event: "Alert Created", agent: "System", details: "PortFlappingDetected alert generated for Switch-A1:port2" },
+      { id: "tl-005", incidentId, timestamp: new Date(baseTime + 25000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing link flap between Switch-A1:port2 (10.0.13.1/30) and Switch-C:port2 (10.0.13.2/30)" },
+      { id: "tl-006", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "Impact Analysis", agent: "RCA Agent", details: "Primary path DPU-1 → A1 → C → DPU-2 affected. 2 downstream networks impacted (10.0.4.0/24)" },
+      { id: "tl-007", incidentId, timestamp: new Date(baseTime + 35000).toISOString(), event: "Error Metrics Confirmed", agent: "RCA Agent", details: "switch_port_errors_in spike detected (CRC/FCS >5/min). Suspected transceiver degradation." },
+      { id: "tl-008", incidentId, timestamp: new Date(baseTime + 40000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Root cause: Link flap on A1-C primary. Confidence: 95%. Recommended: Shutdown port or reweight BGP." },
+      { id: "tl-009", incidentId, timestamp: new Date(baseTime + 45000).toISOString(), event: "Backup Path Identified", agent: "Remediation Agent", details: "Alternate route via Switch-B (10.0.12.0/30) available. Path: A1 → B → C → DPU-2" },
+      { id: "tl-010", incidentId, timestamp: new Date(baseTime + 50000).toISOString(), event: "Remediation Started", agent: "Remediation Agent", details: "Executing: vtysh -c 'interface port2' -c 'shutdown' on Switch-A1" },
+      { id: "tl-011", incidentId, timestamp: new Date(baseTime + 55000).toISOString(), event: "BGP Convergence", agent: "Verification Agent", details: "BGP reconverging to backup peer 10.0.12.2 (Switch-B). Estimated time: 30-60s" },
     ];
   }
   
-  if (incidentId === "INC-2025-002") {
+  // BGP Session Instability
+  if (incidentId === "INC-2026-002") {
     return [
-      { id: "tl-101", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Congestion Detected", agent: "Telemetry Agent", details: "Queue depth at 85% (baseline <15%), latency 250ms" },
-      { id: "tl-102", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "Port congestion detected with 92% confidence" },
-      { id: "tl-103", incidentId, timestamp: new Date(baseTime + 45000).toISOString(), event: "Alert Created", agent: "System", details: "port_congestion alert generated for TOR-3" },
-      { id: "tl-104", incidentId, timestamp: new Date(baseTime + 60000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing traffic patterns on TOR-3 uplink" },
-      { id: "tl-105", incidentId, timestamp: new Date(baseTime + 90000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Hypothesis confirmed: Queue depth 85% + latency 250ms + packet drops = Port congestion (89% confidence)" },
-      { id: "tl-106", incidentId, timestamp: new Date(baseTime + 100000).toISOString(), event: "Policy Check", agent: "Compliance Agent", details: "QoS changes validated against network policies" },
-      { id: "tl-107", incidentId, timestamp: new Date(baseTime + 110000).toISOString(), event: "QoS Adjustment Started", agent: "Remediation Agent", details: "Adjusting buffer thresholds by 20%" },
-      { id: "tl-108", incidentId, timestamp: new Date(baseTime + 130000).toISOString(), event: "QoS Policy Applied", agent: "Remediation Agent", details: "Priority traffic policy reconfigured" },
+      { id: "tl-101", incidentId, timestamp: new Date(baseTime).toISOString(), event: "BGP Session Down", agent: "Telemetry Agent", details: "switch_bgp_peer_state{device='Switch-A1',peer_ip='10.0.13.2'} = 0" },
+      { id: "tl-102", incidentId, timestamp: new Date(baseTime + 10000).toISOString(), event: "Update Storm Detected", agent: "Anomaly Agent", details: "increase(switch_bgp_updates_received[2m]) = 5 - BGPUpdateStorm alert triggered" },
+      { id: "tl-103", incidentId, timestamp: new Date(baseTime + 20000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Correlating BGP state with port2 link status" },
+      { id: "tl-104", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "BGP instability caused by underlying link flap. Confidence: 92%" },
+      { id: "tl-105", incidentId, timestamp: new Date(baseTime + 40000).toISOString(), event: "Weight Adjustment Started", agent: "Remediation Agent", details: "Executing: vtysh -c 'neighbor 10.0.13.2 weight 50' to prefer backup peer" },
+      { id: "tl-106", incidentId, timestamp: new Date(baseTime + 50000).toISOString(), event: "Traffic Shifting", agent: "Verification Agent", details: "switch_port_bytes_out{port='port3'} increasing - traffic moving to backup path" },
     ];
   }
   
-  if (incidentId === "INC-2025-003") {
+  // Traffic Drop
+  if (incidentId === "INC-2026-003") {
     return [
-      { id: "tl-201", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Resource Alert", agent: "Telemetry Agent", details: "DPU-5 CPU at 95% (baseline <70%), latency 250ms" },
-      { id: "tl-202", incidentId, timestamp: new Date(baseTime + 30000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "DPU resource exhaustion detected with 88% confidence" },
-      { id: "tl-203", incidentId, timestamp: new Date(baseTime + 50000).toISOString(), event: "Alert Created", agent: "System", details: "dpu_resource_exhaustion alert generated" },
-      { id: "tl-204", incidentId, timestamp: new Date(baseTime + 70000).toISOString(), event: "RCA Started", agent: "RCA Agent", details: "Analyzing workload patterns on DPU-5" },
-      { id: "tl-205", incidentId, timestamp: new Date(baseTime + 100000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "CPU saturation caused by workload imbalance (85% confidence)" },
-      { id: "tl-206", incidentId, timestamp: new Date(baseTime + 110000).toISOString(), event: "Target DPU Identified", agent: "Remediation Agent", details: "DPU-8 identified with available capacity (CPU 45%, Memory 52%)" },
-      { id: "tl-207", incidentId, timestamp: new Date(baseTime + 120000).toISOString(), event: "Policy Check", agent: "Compliance Agent", details: "Workload migration validated against policies" },
-      { id: "tl-208", incidentId, timestamp: new Date(baseTime + 130000).toISOString(), event: "Migration Started", agent: "Remediation Agent", details: "Live migration of container workload initiated" },
-      { id: "tl-209", incidentId, timestamp: new Date(baseTime + 180000).toISOString(), event: "Offload Rules Updated", agent: "Remediation Agent", details: "Offload rules adjusted for optimal distribution" },
+      { id: "tl-201", incidentId, timestamp: new Date(baseTime).toISOString(), event: "Traffic Drop Alert", agent: "Telemetry Agent", details: "rate(switch_port_bytes_in{port='port2'}[1m]) < 10 bytes/s (was 1.2 MB/s)" },
+      { id: "tl-202", incidentId, timestamp: new Date(baseTime + 15000).toISOString(), event: "PrimaryLinkTrafficDrop Alert", agent: "System", details: "Critical alert: Traffic dropped on Switch-A1:port2" },
+      { id: "tl-203", incidentId, timestamp: new Date(baseTime + 28000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Traffic drop correlated with link flap on primary A1-C path. Confidence: 90%" },
+      { id: "tl-204", incidentId, timestamp: new Date(baseTime + 40000).toISOString(), event: "Backup Path Activated", agent: "Remediation Agent", details: "Traffic rerouted via A1 → B → C → DPU-2. Latency increased from 300µs to 600µs." },
+      { id: "tl-205", incidentId, timestamp: new Date(baseTime + 60000).toISOString(), event: "Traffic Confirmed", agent: "Verification Agent", details: "increase(switch_port_bytes_out{A1:port3}[2m]) > 500KB confirmed" },
     ];
   }
   
-  if (incidentId === "INC-2025-004") {
+  // Link Flap Recovery Complete (Resolved)
+  if (incidentId === "INC-2026-004") {
     const resolvedTime = now.getTime() - 2 * 60 * 60000;
     return [
-      { id: "tl-401", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Link Down Detected", agent: "Telemetry Agent", details: "Interface state changed to down on Spine-2:port3" },
-      { id: "tl-402", incidentId, timestamp: new Date(resolvedTime + 5000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "link_down event detected with 100% confidence" },
-      { id: "tl-403", incidentId, timestamp: new Date(resolvedTime + 10000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Link failure confirmed with 98% confidence" },
-      { id: "tl-404", incidentId, timestamp: new Date(resolvedTime + 25000).toISOString(), event: "Alternate Path Found", agent: "Remediation Agent", details: "Alternate route via Spine-1 identified" },
-      { id: "tl-405", incidentId, timestamp: new Date(resolvedTime + 35000).toISOString(), event: "Remediation Started", agent: "Remediation Agent", details: "Enabling alternate route - OSPF/BGP auto-converging" },
-      { id: "tl-406", incidentId, timestamp: new Date(resolvedTime + 58000).toISOString(), event: "Routing Converged", agent: "Verification Agent", details: "OSPF/BGP convergence completed in 45 seconds" },
-      { id: "tl-407", incidentId, timestamp: new Date(resolvedTime + 115000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "Traffic flowing normally via alternate path. Zero packet loss." },
+      { id: "tl-401", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Excessive Flaps Detected", agent: "Telemetry Agent", details: "changes(switch_port_oper_status[5m]) > 10 on Switch-A1:port2" },
+      { id: "tl-402", incidentId, timestamp: new Date(resolvedTime + 10000).toISOString(), event: "Critical Threshold", agent: "Anomaly Agent", details: "Flap count > 10 in 5min - CRITICAL severity assigned" },
+      { id: "tl-403", incidentId, timestamp: new Date(resolvedTime + 20000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Unrecoverable link instability. Confidence: 98%" },
+      { id: "tl-404", incidentId, timestamp: new Date(resolvedTime + 28000).toISOString(), event: "Port Shutdown Executed", agent: "Remediation Agent", details: "vtysh -c 'interface port2' -c 'shutdown' - Force clean reroute" },
+      { id: "tl-405", incidentId, timestamp: new Date(resolvedTime + 35000).toISOString(), event: "BGP Session Dropped", agent: "Verification Agent", details: "switch_bgp_peer_state{peer_ip='10.0.13.2'} = 0 (permanent)" },
+      { id: "tl-406", incidentId, timestamp: new Date(resolvedTime + 58000).toISOString(), event: "BGP Converged", agent: "Verification Agent", details: "Routes via 10.0.12.2 (Switch-B) now active. Convergence: 45s" },
+      { id: "tl-407", incidentId, timestamp: new Date(resolvedTime + 90000).toISOString(), event: "E2E Validation", agent: "Verification Agent", details: "ping 10.0.4.10 - 0% loss, latency ~600µs (acceptable +1 hop)" },
+      { id: "tl-408", incidentId, timestamp: new Date(resolvedTime + 115000).toISOString(), event: "Incident Resolved", agent: "System", details: "All verification checks passed. Flap cessation confirmed. Status: RESOLVED" },
     ];
   }
   
-  if (incidentId === "INC-2025-005") {
+  // BGP Weight Remediation Complete (Closed)
+  if (incidentId === "INC-2026-005") {
     const resolvedTime = now.getTime() - 4 * 60 * 60000;
     return [
-      { id: "tl-501", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Congestion Detected", agent: "Telemetry Agent", details: "Queue depth at 82% (baseline <15%), latency 230ms" },
-      { id: "tl-502", incidentId, timestamp: new Date(resolvedTime + 45000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "Port congestion detected with 90% confidence" },
-      { id: "tl-503", incidentId, timestamp: new Date(resolvedTime + 105000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Traffic surge causing queue overflow (92% confidence)" },
-      { id: "tl-504", incidentId, timestamp: new Date(resolvedTime + 120000).toISOString(), event: "QoS Adjustment Started", agent: "Remediation Agent", details: "Adjusting buffer thresholds by 20%" },
-      { id: "tl-505", incidentId, timestamp: new Date(resolvedTime + 140000).toISOString(), event: "QoS Policy Applied", agent: "Remediation Agent", details: "Priority traffic policy reconfigured" },
-      { id: "tl-506", incidentId, timestamp: new Date(resolvedTime + 175000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "Queue depth normalized to 12%, latency reduced to 45ms" },
+      { id: "tl-501", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Moderate Flaps Detected", agent: "Telemetry Agent", details: "5-10 flaps in 5min on Switch-A1:port2" },
+      { id: "tl-502", incidentId, timestamp: new Date(resolvedTime + 15000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Moderate instability - prefer backup strategy. Confidence: 94%" },
+      { id: "tl-503", incidentId, timestamp: new Date(resolvedTime + 25000).toISOString(), event: "BGP Reweight Applied", agent: "Remediation Agent", details: "neighbor 10.0.13.2 weight 50 (was 200). Backup peer 10.0.12.2 weight 100 now preferred." },
+      { id: "tl-504", incidentId, timestamp: new Date(resolvedTime + 50000).toISOString(), event: "Traffic Shift Confirmed", agent: "Verification Agent", details: "switch_port_bytes_out{A1:port3} increasing - traffic via backup path" },
+      { id: "tl-505", incidentId, timestamp: new Date(resolvedTime + 90000).toISOString(), event: "Primary Link Monitoring", agent: "Verification Agent", details: "Primary link remains up for recovery monitoring" },
+      { id: "tl-506", incidentId, timestamp: new Date(resolvedTime + 120000).toISOString(), event: "Incident Closed", agent: "System", details: "Backup path stable. Primary available for future restoration." },
     ];
   }
   
-  if (incidentId === "INC-2025-006") {
+  // BGP Timer Adjustment (Closed)
+  if (incidentId === "INC-2026-006") {
     const resolvedTime = now.getTime() - 6 * 60 * 60000;
     return [
-      { id: "tl-601", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Resource Alert", agent: "Telemetry Agent", details: "DPU-12 CPU at 94%, latency 245ms" },
-      { id: "tl-602", incidentId, timestamp: new Date(resolvedTime + 35000).toISOString(), event: "Anomaly Flagged", agent: "Anomaly Agent", details: "DPU resource exhaustion detected with 86% confidence" },
-      { id: "tl-603", incidentId, timestamp: new Date(resolvedTime + 95000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "CPU saturation caused by workload imbalance (88% confidence)" },
-      { id: "tl-604", incidentId, timestamp: new Date(resolvedTime + 110000).toISOString(), event: "Target DPU Identified", agent: "Remediation Agent", details: "DPU-15 identified with available capacity" },
-      { id: "tl-605", incidentId, timestamp: new Date(resolvedTime + 130000).toISOString(), event: "Migration Started", agent: "Remediation Agent", details: "Live migration of container workload initiated" },
-      { id: "tl-606", incidentId, timestamp: new Date(resolvedTime + 200000).toISOString(), event: "Offload Rules Updated", agent: "Remediation Agent", details: "Offload rules adjusted for optimal distribution" },
-      { id: "tl-607", incidentId, timestamp: new Date(resolvedTime + 285000).toISOString(), event: "Verified Resolved", agent: "Verification Agent", details: "CPU normalized to 62%, latency recovered to 78ms" },
+      { id: "tl-601", incidentId, timestamp: new Date(resolvedTime).toISOString(), event: "Minor Flaps Detected", agent: "Telemetry Agent", details: "<5 flaps in 5min on Switch-A1:port2" },
+      { id: "tl-602", incidentId, timestamp: new Date(resolvedTime + 10000).toISOString(), event: "RCA Completed", agent: "RCA Agent", details: "Minor instability - timer tuning recommended. Confidence: 88%" },
+      { id: "tl-603", incidentId, timestamp: new Date(resolvedTime + 20000).toISOString(), event: "Timer Adjustment Applied", agent: "Remediation Agent", details: "neighbor 10.0.13.2 timers 60 180 (was 5 15). BGP now tolerates brief flaps." },
+      { id: "tl-604", incidentId, timestamp: new Date(resolvedTime + 45000).toISOString(), event: "Link Stabilizing", agent: "Verification Agent", details: "No new state changes detected in 2min window" },
+      { id: "tl-605", incidentId, timestamp: new Date(resolvedTime + 90000).toISOString(), event: "Incident Closed", agent: "System", details: "Link stabilized. E2E SLA maintained on primary path." },
     ];
   }
   
@@ -554,94 +590,70 @@ function generateTimeline(incidentId: string): TimelineEvent[] {
 }
 
 function generateRemediation(incidentId: string): RemediationStep[] {
-  if (incidentId === "INC-2025-002") {
+  // BGP Link Flap - Primary Incident (Active, Critical)
+  if (incidentId === "INC-2026-001") {
     return [
-      { id: "rem-201", incidentId, step: 1, description: "Analyze queue depth, latency, and packet drop metrics", status: "completed" },
-      { id: "rem-202", incidentId, step: 2, description: "Adjust QoS buffer thresholds (+20%)", status: "completed" },
-      { id: "rem-203", incidentId, step: 3, description: "Reconfigure QoS policy to priority_traffic", status: "running" },
-      { id: "rem-204", incidentId, step: 4, description: "Verify queue depth and latency normalized", status: "pending" },
+      { id: "rem-001", incidentId, step: 1, description: "Evaluate flap severity: changes(switch_port_oper_status[5m]) > 10 → SHUTDOWN action", status: "completed" },
+      { id: "rem-002", incidentId, step: 2, description: "Execute: vtysh -c 'interface port2' -c 'shutdown' on Switch-A1", status: "completed" },
+      { id: "rem-003", incidentId, step: 3, description: "Wait for BGP convergence to backup peer 10.0.12.2 (30-60s)", status: "running" },
+      { id: "rem-004", incidentId, step: 4, description: "Verify switch_bgp_peer_state{peer_ip='10.0.12.2'} = 1", status: "pending" },
+      { id: "rem-005", incidentId, step: 5, description: "Confirm traffic shift: increase(switch_port_bytes_out{port='port3'}[2m]) > 500KB", status: "pending" },
+      { id: "rem-006", incidentId, step: 6, description: "E2E validation: ping 10.0.4.10 - 0% loss expected", status: "pending" },
     ];
   }
   
-  if (incidentId === "INC-2025-003") {
+  // BGP Session Instability
+  if (incidentId === "INC-2026-002") {
     return [
-      { id: "rem-301", incidentId, step: 1, description: "Analyze DPU CPU, memory, and latency metrics", status: "completed" },
-      { id: "rem-302", incidentId, step: 2, description: "Identify target DPU with available capacity", status: "completed" },
-      { id: "rem-303", incidentId, step: 3, description: "Migrate workload to DPU-8 (live migration)", status: "running" },
-      { id: "rem-304", incidentId, step: 4, description: "Adjust offload rules for optimal distribution", status: "pending" },
-      { id: "rem-305", incidentId, step: 5, description: "Verify CPU normalized and latency recovered", status: "pending" },
+      { id: "rem-201", incidentId, step: 1, description: "Evaluate flap severity: 5-10 flaps in 5min → REWEIGHT action", status: "completed" },
+      { id: "rem-202", incidentId, step: 2, description: "Execute: vtysh -c 'neighbor 10.0.13.2 weight 50' (was 200)", status: "completed" },
+      { id: "rem-203", incidentId, step: 3, description: "Wait for BGP best-path recalculation (backup peer weight 100 now preferred)", status: "running" },
+      { id: "rem-204", incidentId, step: 4, description: "Verify traffic shifting to backup path A1 → B → C", status: "pending" },
     ];
   }
   
-  if (incidentId === "INC-2025-004") {
+  // Traffic Drop
+  if (incidentId === "INC-2026-003") {
     return [
-      { id: "rem-401", incidentId, step: 1, description: "Identify link failure location", status: "completed" },
-      { id: "rem-402", incidentId, step: 2, description: "Find alternate route via Spine-1", status: "completed" },
-      { id: "rem-403", incidentId, step: 3, description: "Enable alternate route - OSPF/BGP auto-converging", status: "completed" },
-      { id: "rem-404", incidentId, step: 4, description: "Verify traffic flowing via alternate path", status: "completed" },
+      { id: "rem-301", incidentId, step: 1, description: "Correlate traffic drop with link flap on port2", status: "completed" },
+      { id: "rem-302", incidentId, step: 2, description: "Activate backup path via Switch-B (10.0.12.0/30)", status: "completed" },
+      { id: "rem-303", incidentId, step: 3, description: "Monitor latency increase (expected: 300µs → 600µs, +1 hop)", status: "running" },
+      { id: "rem-304", incidentId, step: 4, description: "Verify E2E connectivity: DPU-1 → A1 → B → C → DPU-2", status: "pending" },
     ];
   }
   
-  if (incidentId === "INC-2025-005") {
+  // Link Flap Recovery Complete (Resolved)
+  if (incidentId === "INC-2026-004") {
     return [
-      { id: "rem-501", incidentId, step: 1, description: "Analyze queue depth, latency, and packet drop metrics", status: "completed" },
-      { id: "rem-502", incidentId, step: 2, description: "Adjust QoS buffer thresholds (+20%)", status: "completed" },
-      { id: "rem-503", incidentId, step: 3, description: "Reconfigure QoS policy to priority_traffic", status: "completed" },
-      { id: "rem-504", incidentId, step: 4, description: "Verify queue depth and latency normalized", status: "completed" },
+      { id: "rem-401", incidentId, step: 1, description: "Flap count > 10 in 5min detected - CRITICAL severity", status: "completed" },
+      { id: "rem-402", incidentId, step: 2, description: "Port shutdown executed: vtysh -c 'interface port2' -c 'shutdown'", status: "completed" },
+      { id: "rem-403", incidentId, step: 3, description: "BGP reconvergence completed - backup routes installed", status: "completed" },
+      { id: "rem-404", incidentId, step: 4, description: "E2E validation: ping 10.0.4.10 - 0% loss confirmed", status: "completed" },
+      { id: "rem-405", incidentId, step: 5, description: "Flap cessation confirmed: changes(switch_port_oper_status[5m]) = 0", status: "completed" },
     ];
   }
   
-  if (incidentId === "INC-2025-006") {
+  // BGP Weight Remediation Complete (Closed)
+  if (incidentId === "INC-2026-005") {
     return [
-      { id: "rem-601", incidentId, step: 1, description: "Analyze DPU CPU, memory, and latency metrics", status: "completed" },
-      { id: "rem-602", incidentId, step: 2, description: "Identify target DPU with available capacity", status: "completed" },
-      { id: "rem-603", incidentId, step: 3, description: "Migrate workload to DPU-15 (live migration)", status: "completed" },
-      { id: "rem-604", incidentId, step: 4, description: "Adjust offload rules for optimal distribution", status: "completed" },
-      { id: "rem-605", incidentId, step: 5, description: "Verify CPU normalized and latency recovered", status: "completed" },
+      { id: "rem-501", incidentId, step: 1, description: "Moderate flaps detected (5-10 in 5min) - HIGH severity", status: "completed" },
+      { id: "rem-502", incidentId, step: 2, description: "BGP reweight applied: neighbor 10.0.13.2 weight 50", status: "completed" },
+      { id: "rem-503", incidentId, step: 3, description: "Traffic shift verified: backup path A1 → B → C now active", status: "completed" },
+      { id: "rem-504", incidentId, step: 4, description: "Primary link left up for monitoring/recovery", status: "completed" },
     ];
   }
   
-  if (incidentId !== "INC-2025-001") {
-    return [];
+  // BGP Timer Adjustment (Closed)
+  if (incidentId === "INC-2026-006") {
+    return [
+      { id: "rem-601", incidentId, step: 1, description: "Minor flaps detected (<5 in 5min) - MEDIUM severity", status: "completed" },
+      { id: "rem-602", incidentId, step: 2, description: "Timer adjustment: neighbor 10.0.13.2 timers 60 180 (was 5 15)", status: "completed" },
+      { id: "rem-603", incidentId, step: 3, description: "Link stabilized - no additional state changes", status: "completed" },
+      { id: "rem-604", incidentId, step: 4, description: "E2E SLA maintained on primary path", status: "completed" },
+    ];
   }
   
-  return [
-    {
-      id: "rem-001",
-      incidentId,
-      step: 1,
-      description: "Monitor BGP convergence on affected routers",
-      status: "completed",
-    },
-    {
-      id: "rem-002",
-      incidentId,
-      step: 2,
-      description: "Wait for OSPF route update propagation (30-60s)",
-      status: "running",
-    },
-    {
-      id: "rem-003",
-      incidentId,
-      step: 3,
-      description: "Verify new paths are active and receiving traffic",
-      status: "pending",
-    },
-    {
-      id: "rem-004",
-      incidentId,
-      step: 4,
-      description: "Confirm traffic flowing through alternate paths",
-      status: "pending",
-    },
-    {
-      id: "rem-005",
-      incidentId,
-      step: 5,
-      description: "Update network topology graph",
-      status: "pending",
-    },
-  ];
+  return [];
 }
 
 function generateLearningUpdates(): LearningUpdate[] {
@@ -684,40 +696,95 @@ function generateLearningUpdates(): LearningUpdate[] {
 function generateMockTopologyLinks(devices: Device[]): TopologyLink[] {
   const links: TopologyLink[] = [];
   
-  const core = devices.find(d => d.type === "core");
-  const spines = devices.filter(d => d.type === "spine");
-  const tors = devices.filter(d => d.type === "tor");
+  // BGP Fabric Topology Links based on Prestera document
+  // Management Plane Links (192.168.100.0/24)
   
-  if (core) {
-    spines.forEach((spine, idx) => {
-      links.push({
-        id: `link-core-spine-${idx}`,
-        sourceId: core.id,
-        targetId: spine.id,
-        sourcePort: idx + 1,
-        targetPort: 1,
-        status: spine.status === "healthy" ? "active" : "error",
-        bandwidth: 100000,
-        utilization: 20 + Math.random() * 40,
-      });
-    });
-  }
+  // Cloud-Host → MGMT-SW
+  links.push({
+    id: "link-cloud-mgmt",
+    sourceId: "cloud-host",
+    targetId: "mgmt-sw",
+    sourcePort: 1,
+    targetPort: 1,
+    status: "active",
+    bandwidth: 1000,
+    utilization: 15,
+  });
   
-  spines.forEach((spine, spineIdx) => {
-    tors.forEach((tor, torIdx) => {
-      if (torIdx % 2 === spineIdx % 2) {
-        links.push({
-          id: `link-spine-tor-${spineIdx}-${torIdx}`,
-          sourceId: spine.id,
-          targetId: tor.id,
-          sourcePort: torIdx + 2,
-          targetPort: spineIdx + 1,
-          status: tor.status === "healthy" && spine.status === "healthy" ? "active" : "error",
-          bandwidth: 40000,
-          utilization: 30 + Math.random() * 50,
-        });
-      }
+  // MGMT-SW → All devices (management connections)
+  ["switch-a1", "switch-b", "switch-c", "dpu-1", "dpu-2"].forEach((deviceId, idx) => {
+    links.push({
+      id: `link-mgmt-${deviceId}`,
+      sourceId: "mgmt-sw",
+      targetId: deviceId,
+      sourcePort: idx + 2,
+      targetPort: 0, // eth0 for management
+      status: "active",
+      bandwidth: 1000,
+      utilization: 5 + Math.random() * 10,
     });
+  });
+  
+  // Data Plane Links (10.0.x.x IP Space)
+  
+  // DPU-1 eth1 → Switch-A1 port1 (10.0.1.0/24)
+  links.push({
+    id: "link-dpu1-a1",
+    sourceId: "dpu-1",
+    targetId: "switch-a1",
+    sourcePort: 1, // eth1
+    targetPort: 1, // port1
+    status: "active",
+    bandwidth: 10000,
+    utilization: 35,
+  });
+  
+  // Switch-A1 port2 ↔ Switch-C port2 (10.0.13.0/30) - PRIMARY LINK (FLAPPING)
+  links.push({
+    id: "link-a1-c-primary",
+    sourceId: "switch-a1",
+    targetId: "switch-c",
+    sourcePort: 2, // port2
+    targetPort: 2, // port2
+    status: "error", // Currently flapping
+    bandwidth: 10000,
+    utilization: 5, // Low due to flap
+  });
+  
+  // Switch-A1 port3 ↔ Switch-B port1 (10.0.12.0/30) - BACKUP LINK
+  links.push({
+    id: "link-a1-b-backup",
+    sourceId: "switch-a1",
+    targetId: "switch-b",
+    sourcePort: 3, // port3
+    targetPort: 1, // port1
+    status: "active",
+    bandwidth: 10000,
+    utilization: 75, // High due to traffic reroute
+  });
+  
+  // Switch-B port2 ↔ Switch-C port3 (10.0.23.0/30) - TRANSIT LINK
+  links.push({
+    id: "link-b-c-transit",
+    sourceId: "switch-b",
+    targetId: "switch-c",
+    sourcePort: 2, // port2
+    targetPort: 3, // port3
+    status: "active",
+    bandwidth: 10000,
+    utilization: 70, // High due to traffic reroute
+  });
+  
+  // Switch-C port4 → DPU-2 eth1 (10.0.4.0/24)
+  links.push({
+    id: "link-c-dpu2",
+    sourceId: "switch-c",
+    targetId: "dpu-2",
+    sourcePort: 4, // port4
+    targetPort: 1, // eth1
+    status: "active",
+    bandwidth: 10000,
+    utilization: 40,
   });
   
   return links;

@@ -1,0 +1,1479 @@
+End-to-End Project Document: Prestera BGP Fabric with Link Flap Detection & Auto Reroute (Agentic Mode)
+Use Case: Link Flap + Automatic Traffic Rerouting
+Platform: Marvell Prestera-based switches (Switch-A1, Switch-B, Switch-C) running SONiC + FRR
+Environment: GNS3 (primary emulation) + optional NS-3 simulation
+Telemetry: SONiC NOS native Prometheus metrics + FRR exporter
+Control/Data Separation: Dedicated management subnet vs. data-plane fabric
+
+TOPOLOGY DIAGRAMS
+Overview: Full Network Topology
+text
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         CLOUD-HOST (192.168.100.1)                       │
+│                     (Prometheus, Grafana, LangGraph Agents)             │
+└──────────────────────────────────┬──────────────────────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+        ┌───────────────────────────┐   ┌─────────────────────────┐
+        │      MGMT-SW (L2)         │   │  MANAGEMENT NETWORK      │
+        │   (Ethernet Switch)       │   │  192.168.100.0/24        │
+        │                           │   │  (Control Plane Only)    │
+        └───────────────────────────┘   └─────────────────────────┘
+        │     │     │      │       │
+        ├─────┼─────┼──────┤       │
+        │     │     │      │       │
+     eth0  eth0  eth0   eth0    eth0
+        │     │     │      │       │
+   ┌────┴─┐ ┌─┴───┐ ┌─┴────┐ ┌──┴──┐ ┌─────┐
+   │DPU-1 │ │DPU-2│ │SW-A1 │ │SW-B │ │SW-C │
+   │.11   │ │.12  │ │.21   │ │.22  │ │.23  │
+   └───┬──┘ └──┬──┘ └──┬───┘ └──┬──┘ └──┬──┘
+       │       │       │        │       │
+       │       │       │        │       │
+       └───────────────────────────────┘  (Management Plane)
+               │           │           │
+         ┌─────┴───────────┼───────────┴──────┐
+         │ eth1      port1 │       port4   eth1│
+         │                 │                   │
+    ┌────┴──────┐          └─────────────┬────┴────┐
+    │            │                       │          │
+    │ DPU-1      │     DATA-PLANE FABRIC │   DPU-2  │
+    │10.0.1.10   │     (BGP Layer 3)     │10.0.4.10 │
+    │   /24      │                       │   /24    │
+    │            │                       │          │
+    └────┬──────┘                        └────┬─────┘
+         │                                    │
+         │                                    │
+    ┌────┴────────────────────┐        ┌─────┴─────┐
+    │        Switch-A1         │        │ Switch-C  │
+    │      (AS 65101)          │        │(AS 65103) │
+    │  port1: 10.0.1.1/24      │        │ port4:    │
+    │  10.0.1.0/24 network     │        │ 10.0.4.1/ │
+    │                          │        │ 10.0.4.0/ │
+    │  port2 ↔ 10.0.13.1/30    │        │ port2:    │
+    │       (PRIMARY)          │        │10.0.13.2/ │
+    │  port3 ↔ 10.0.12.1/30    │        │10.0.13.0/ │
+    │       (BACKUP)           │        │ port3:    │
+    │                          │        │10.0.23.2/ │
+    │  Weight Policy:          │        │10.0.23.0/ │
+    │  C (10.0.13.2): 200      │        │           │
+    │  B (10.0.12.2): 100      │        │  Peers:   │
+    │                          │        │  A1: none │
+    │  Neighbors:              │        │  B (10.0. │
+    │  10.0.13.2/65103 (C)     │        │  23.1)    │
+    │  10.0.12.2/65102 (B)     │        │  A1 (10.0 │
+    │                          │        │  .13.1)   │
+    └──────┬──────────┬────────┘        └─────┬──────┘
+           │          │                      │
+           │          └──────────────────────┘
+    port2  │  (PRIMARY, Subject to Flap)
+  10.0.13.0/30
+   PRIMARY │
+  (weight200)
+           │
+    ┌──────┴─────────────────────────────────────────┐
+    │         PRIMARY PATH (A1-C Direct)             │
+    │    DPU-1 → A1 → C → DPU-2                      │
+    │    ✓ Low latency (2 hops)                      │
+    │    ✗ Subject to flapping (transceiver issue)   │
+    └──────────────────────────────────────────────────┘
+           │
+      port3│  (BACKUP, Active during flap)
+   10.0.12.0/30
+   BACKUP  │
+  (weight100)
+           │
+    ┌──────┴───────────────────────────────────────┐
+    │                                               │
+    │          Switch-B                            │
+    │       (AS 65102)                             │
+    │       (Transit/Spine)                        │
+    │                                              │
+    │ port1: 10.0.12.2/30 (to A1)                 │
+    │ port2: 10.0.23.1/30 (to C)                  │
+    │                                              │
+    │ Peers:                                      │
+    │ A1 (10.0.12.1)                              │
+    │ C (10.0.23.2)                               │
+    │                                              │
+    │ (No local networks advertised)              │
+    └──────────────────────────────────────────────┘
+           │              │
+           │              └─────┐
+           │                    │
+      port1│ 10.0.12.0/30   port2│ 10.0.23.0/30
+           │                    │
+    ┌──────┴────────┐      ┌────┴──────┐
+    │               │      │           │
+    │ BACKUP PATH:  │      │ Switch-C  │
+    │ A1 → B → C    │      │ port3:    │
+    │               │      │ 10.0.23.2 │
+    │ • Activated   │      │ /30       │
+    │   during      │      │           │
+    │   A1-C flap   │      └───────────┘
+    │ • 1 extra hop │
+    │ • Higher      │
+    │   latency     │
+    │ • Stable      │
+    │               │
+    └───────────────┘
+           │
+    ┌──────┴──────────────┐
+    │ BACKUP PATH (A1-B-C)│
+    │ DPU-1 → A1 → B → C  │
+    │ → DPU-2            │
+    │ ✓ Reliable          │
+    │ ✗ Slightly slower   │
+    └─────────────────────┘
+Control-Plane (Management) Network Diagram
+text
+                        CLOUD-HOST (Gateway)
+                    192.168.100.1/24 (Mgmt)
+                              │
+                              │ (eth0 or mgmt)
+                              │
+                    ┌─────────────────────┐
+                    │    MGMT-SW (L2)     │
+                    │  Ethernet Switch    │
+                    └─────────────────────┘
+              ┌──────────┬────────┬────────┬──────────┐
+              │          │        │        │          │
+          eth0│      eth0│    eth0│    eth0│      eth0│
+              │          │        │        │          │
+         ┌────┴──┐  ┌────┴──┐ ┌──┴───┐ ┌──┴───┐ ┌───┴────┐
+         │ DPU-1 │  │ DPU-2 │ │SW-A1 │ │SW-B  │ │ SW-C   │
+         │.11/24 │  │.12/24 │ │.21/24│ │.22/24│ │.23/24  │
+         │       │  │       │ │      │ │      │ │        │
+         └───────┘  └───────┘ └──────┘ └──────┘ └────────┘
+
+Management Network: 192.168.100.0/24
+Purpose: SSH, gNMI, Prometheus scraping, configuration only
+NO BGP, NO data traffic flows here
+Data-Plane (BGP Fabric) Network Diagram
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                   DATA-PLANE BGP FABRIC                         │
+│                  (10.0.x.x IP Space)                           │
+└─────────────────────────────────────────────────────────────────┘
+
+DPU-1 (10.0.1.10/24)
+      eth1
+       │
+       │ 10.0.1.0/24 (Access Link)
+       │
+    port1
+       │
+  ┌────┴─────────────────────────────────────┐
+  │      SWITCH-A1 (AS 65101)                 │
+  │      Router-ID: 1.1.1.1                  │
+  │      Advertises: 10.0.1.0/24             │
+  │                                          │
+  │  ┌─────────────────────────────────────┐ │
+  │  │ port1: 10.0.1.1/24 (to DPU-1)      │ │
+  │  │ port2: 10.0.13.1/30 (to C)         │ │
+  │  │        PRIMARY (weight=200)        │ │
+  │  │ port3: 10.0.12.1/30 (to B)         │ │
+  │  │        BACKUP (weight=100)         │ │
+  │  └─────────────────────────────────────┘ │
+  │                                          │
+  │  BGP Neighbors:                         │
+  │  • 10.0.13.2 (C) weight=200             │
+  │  • 10.0.12.2 (B) weight=100             │
+  │                                          │
+  │  BGP Timers: 5 15 (keepalive/hold)     │
+  └────┬──────────────────────┬─────────────┘
+       │                      │
+       │ port2                │ port3
+       │ 10.0.13.0/30         │ 10.0.12.0/30
+       │ PRIMARY              │ BACKUP
+       │ (weight 200)         │ (weight 100)
+       │                      │
+       │                  ┌───┴──────────────────────┐
+       │                  │                          │
+       │                  │   SWITCH-B (AS 65102)    │
+       │                  │   Router-ID: 2.2.2.2    │
+       │                  │   (Transit/Spine)       │
+       │                  │                         │
+       │                  │ ┌──────────────────────┐│
+       │                  │ │port1: 10.0.12.2/30  ││
+       │                  │ │(to A1)               ││
+       │                  │ │port2: 10.0.23.1/30  ││
+       │                  │ │(to C)                ││
+       │                  │ └──────────────────────┘│
+       │                  │                         │
+       │                  │ BGP Neighbors:         │
+       │                  │ • 10.0.12.1 (A1)      │
+       │                  │ • 10.0.23.2 (C)       │
+       │                  └───┬──────────────────┬──┘
+       │                      │                 │
+       └──────────────────────┤                 │
+          10.0.13.0/30        │                 │
+          PRIMARY PATH        │ port2           │ port1
+          (A1-C Direct)       │ 10.0.23.0/30    │ 10.0.12.0/30
+          FLAP TEST LINK      │                 │
+                              │ BACKUP LINK     │ TO A1
+                              │                 │
+                    ┌─────────┴─────┐          │
+                    │               │          │
+           ┌────────┴──────┐  ┌─────┴──────────┴──────────────┐
+           │               │  │                               │
+           │ SWITCH-C      │  │      (BACKUP PATH)            │
+           │ (AS 65103)    │  │   A1 → B → C                 │
+           │ Router-ID:    │  │                               │
+           │ 3.3.3.3       │  │ A1-B LINK: 10.0.12.0/30      │
+           │               │  │ B-C LINK: 10.0.23.0/30       │
+           │ Advertises:   │  │                               │
+           │ 10.0.4.0/24   │  │ Used when A1-C link flaps    │
+           │               │  │                               │
+           │ ┌───────────────────────────┐ │                │
+           │ │ port2: 10.0.13.2/30      │ │                │
+           │ │ (to A1) PRIMARY          │ │                │
+           │ │ port3: 10.0.23.2/30      │ │                │
+           │ │ (to B) BACKUP            │ │                │
+           │ │ port4: 10.0.4.1/24       │ │                │
+           │ │ (to DPU-2)               │ │                │
+           │ └───────────────────────────┘ │                │
+           │                               │                │
+           │ BGP Neighbors:               │                │
+           │ • 10.0.13.1 (A1)            │                │
+           │ • 10.0.23.1 (B)             │                │
+           │                               │                │
+           └────────┬──────────────────────┘                │
+                    │ port4                                 │
+                    │ 10.0.4.0/24                          │
+                    │ (Access Link to DPU-2)                │
+                    │                                       │
+                    └───────────────────────────────────────┘
+                            eth1
+                             │
+                        DPU-2 (10.0.4.10/24)
+Path Diversity Diagram
+text
+DPU-1                                                        DPU-2
+(10.0.1.10)                                                (10.0.4.10)
+   │                                                            │
+   │ eth1 (10.0.1.0/24)                                   eth1 │
+   │                                                            │
+   ▼                                                            ▼
+┌────────────┐                                          ┌────────────┐
+│  Switch-A1 │                                          │  Switch-C  │
+│AS 65101    │                                          │AS 65103    │
+│ 1.1.1.1    │                                          │ 3.3.3.3    │
+└────────────┘                                          └────────────┘
+   │  │                                                    │  │
+   │  │ port2 ↔ 10.0.13.0/30 ↔ port2 PRIMARY           │  │
+   │  └─────────────────────────────────────────────────┘  │
+   │     PATH 1: A1 ↔ C (Direct)                            │
+   │     • Low latency (~200µs)                            │
+   │     • Weight: 200 (preferred)                         │
+   │     • PROBLEM: Subject to flaps                       │
+   │                                                        │
+   │ port3 ↔ 10.0.12.0/30 ↔ port1                        │
+   └─────────────────────────────┐                        │
+       PATH 2: A1 ↔ B            │                        │
+       (First leg)               │                        │
+                                 ▼                        │
+                            ┌────────────┐                │
+                            │  Switch-B  │                │
+                            │AS 65102    │                │
+                            │ 2.2.2.2    │                │
+                            └────────────┘                │
+                                 │                        │
+                     port2 ↔ 10.0.23.0/30 ↔ port3       │
+                     PATH 2: B ↔ C (Second leg)           │
+                                 │                        │
+                                 ▼                        │
+                            ┌────────────┐                │
+                            │  Switch-C  │ ◀──────────────┘
+                            │AS 65103    │
+                            │ 3.3.3.3    │
+                            └────────────┘
+
+TRAFFIC PATHS:
+──────────────
+
+PRIMARY PATH (Normal Operation):
+DPU-1 → A1 → C → DPU-2
+  └─ Hops: 3
+  └─ Latency: ~300µs (baseline)
+  └─ BGP Weight: A1→C=200 (preferred)
+  └─ Status: ✓ Active (until flap detected)
+
+BACKUP PATH (During A1-C Flap):
+DPU-1 → A1 → B → C → DPU-2
+  └─ Hops: 4
+  └─ Latency: ~600µs (+1 hop, acceptable)
+  └─ BGP Weight: A1→B=100, B→C=default
+  └─ Status: ✓ Active (after convergence)
+  └─ Failover Time: <60s (BGP convergence)
+
+REDUNDANCY MODEL:
+─────────────────
+• Two independent paths exist
+• Primary optimized for low latency
+• Backup provides resilience
+• Agentic system detects flaps and steers traffic
+• No manual intervention required
+Flap Detection & Remediation Timeline
+text
+TIME (seconds)
+│
+0 ├─ FLAP STARTS (port2 on A1 goes down/up/down...)
+  │  │ Metric changes:
+  │  │ • switch_port_oper_status: 1 → 0 → 1 → 0 ...
+  │  │ • switch_bgp_peer_state: 1 → 0 → 1 → 0 ...
+  │  │ • switch_bgp_updates_received: spike
+  │  │
+ 10├─ [Telemetry Agent] Scrapes Prometheus
+  │  │ Rule 1: changes(oper_status[2m]) = 1 (not yet ≥3)
+  │  │ Rule 2: Not triggered yet
+  │  │ (No alert yet)
+  │
+ 20├─ [Telemetry Agent] Second scrape
+  │  │ Rule 1: changes(oper_status[2m]) = 3 ✓ TRIGGER
+  │  │ Emits: link_flap_detected event
+  │  │ Confidence: 95%
+  │  │
+  │  ├─────────────── TTD (Time To Detect) = ~20-30s ✓
+  │  │
+  │  │ [RCA Agent] Starts analysis (input: flap event)
+  │  │ • Queries: switch_bgp_peer_state
+  │  │ • Checks: switch_port_errors_in
+  │  │ • Topology lookup: A1:port2 ↔ C:port2
+  │  │ • Computes impact
+  │  │ Output: RCA (confidence=95%, action=shutdown)
+  │
+ 30├─ [Remediation Agent] Receives RCA
+  │  │ Decision: flap_count > 10 in 5min?
+  │  │          → Action: SHUTDOWN port2
+  │  │ Executes: vtysh -c "shutdown"
+  │  │ Result: Success
+  │
+ 35├─ [Execution] Port2 on A1 is now down
+  │  │ Effect: BGP session to C drops immediately
+  │  │
+  │  ├─────────────── TTR (Time To Remediate) = ~15s ✓
+  │
+ 40├─ [BGP Convergence] FRR recalculates routes
+  │  │ • Withdraws routes via 10.0.13.2
+  │  │ • Installs routes via 10.0.12.2 (B)
+  │  │ Metric change:
+  │  │ • switch_bgp_peer_state{peer=10.0.13.2} = 0 (stays down)
+  │  │ • switch_bgp_peer_state{peer=10.0.12.2} = 1 (up)
+  │  │
+ 60├─ [BGP Convergence Complete]
+  │  │ • All routes via B now active
+  │  │ • Traffic shifted: A1 → B → C → DPU-2
+  │  │ Metric confirmation:
+  │  │ • switch_port_bytes_out{A1:port3} increasing (backup now used)
+  │  │ • switch_port_bytes_in{B:port1} increasing
+  │  │ • switch_port_bytes_in{B:port2} increasing
+  │  │
+  │  ├─────────────── Convergence Time = ~30-60s ✓
+  │
+ 90├─ [Verification Agent] Runs checks
+  │  │ Check 1: BGP state
+  │  │   switch_bgp_peer_state{A1:10.0.12.2} = 1 ✓
+  │  │   switch_bgp_prefixes_received{A1:10.0.12.2} > 0 ✓
+  │  │
+  │  │ Check 2: Traffic shift
+  │  │   increase(bytes_out{A1:port3}[2m]) > 500KB ✓
+  │  │   increase(bytes_in{B:port2}[2m]) > 500KB ✓
+  │  │
+  │  │ Check 3: E2E validation
+  │  │   ping 10.0.4.10 → 0% loss ✓
+  │  │   Latency: ~600µs (acceptable, +1 hop) ✓
+  │  │
+  │  │ Check 4: Flap cessation
+  │  │   changes(oper_status[5m]) = 0 ✓
+  │  │
+  │  ├─────────────── TTTR (Time To Traffic Restore) = ~90s ✓
+  │
+120├─ [Incident Closed]
+  │  │ Status: RESOLVED
+  │  │ Duration: 120s (TTD + TTR + TTTR)
+  │  │
+  │  │ Alerts:
+  │  │ • Incident opened at t=20s
+  │  │ • Remediation action at t=35s
+  │  │ • All systems nominal at t=120s
+  │  │ • Incident closed, log entry created
+  │  │
+1. Executive Summary
+This project designs and implements an autonomous self-healing network fabric in a lab environment, where:
+
+A switch port intermittently flaps (rapid up/down transitions) on a primary inter-switch link (Switch-A1 ↔ Switch-C).
+
+This flap induces BGP session instability and transient traffic loss between DPU-1 and DPU-2.
+
+An agentic system (Telemetry, RCA, Remediation, Verification agents) uses SONiC-native metrics to:
+
+Detect the flap pattern (using switch_port_oper_status, BGP updates, and traffic metrics).
+
+Diagnose the root cause and impacted paths.
+
+Remediate by steering traffic onto a backup path (via Switch-B) using BGP policy and/or port control.
+
+Verify end-to-end recovery and stability via BGP state and traffic metrics.
+
+The design respects strict control-plane / data-plane separation, uses only metrics actually exposed by SONiC NOS, and is suitable as a PoC for autonomous self-healing in a data-center fabric.
+
+2. Topology & Addressing
+2.1 Nodes
+Node	Type	Role
+Cloud-Host	Mgmt VM/Server	Observability (Prometheus, Grafana, agents)
+Mgmt-SW	L2 switch/bridge	Management network fanout
+DPU-1	Ubuntu VM	Data-plane host (source)
+DPU-2	Ubuntu VM	Data-plane host (destination)
+Switch-A1	SONiC+FRR	Prestera ToR, AS 65101, DPU-1 facing
+Switch-B	SONiC+FRR	Prestera spine/transit, AS 65102
+Switch-C	SONiC+FRR	Prestera ToR, AS 65103, DPU-2 facing
+2.2 Control-Plane (Management) Network
+Subnet: 192.168.100.0/24
+Purpose: SSH, gNMI, Prometheus scraping, configuration/monitoring only. No routing protocols, no data traffic.
+
+Device	Mgmt IP
+Cloud-Host	192.168.100.1/24
+DPU-1	192.168.100.11/24
+DPU-2	192.168.100.12/24
+Switch-A1	192.168.100.21/24
+Switch-B	192.168.100.22/24
+Switch-C	192.168.100.23/24
+Each node's mgmt interface (eth0) connects to Mgmt-SW, which connects to Cloud-Host (gateway).
+
+2.3 Data-Plane Network
+Access Links (DPU ↔ Aggregation):
+
+DPU-1 ↔ Switch-A1:
+
+Subnet: 10.0.1.0/24
+
+DPU-1 eth1: 10.0.1.10/24
+
+Switch-A1 port1: 10.0.1.1/24
+
+DPU-2 ↔ Switch-C:
+
+Subnet: 10.0.4.0/24
+
+DPU-2 eth1: 10.0.4.10/24
+
+Switch-C port4: 10.0.4.1/24
+
+Inter-Switch Links (L3 BGP Fabric):
+
+Switch-A1 ↔ Switch-C (PRIMARY, subject to flap test):
+
+Subnet: 10.0.13.0/30
+
+A1 port2: 10.0.13.1/30
+
+C port2: 10.0.13.2/30
+
+Switch-A1 ↔ Switch-B:
+
+Subnet: 10.0.12.0/30
+
+A1 port3: 10.0.12.1/30
+
+B port1: 10.0.12.2/30
+
+Switch-B ↔ Switch-C:
+
+Subnet: 10.0.23.0/30
+
+B port2: 10.0.23.1/30
+
+C port3: 10.0.23.2/30
+
+DPU Default Routes (data-plane):
+
+DPU-1: default via 10.0.1.1 dev eth1
+
+DPU-2: default via 10.0.4.1 dev eth1
+
+3. BGP Fabric Design
+3.1 BGP ASNs, Router IDs, and Policy
+Switch	ASN	Router ID	Advertised Network	Primary Peer	Backup Peer
+A1	65101	1.1.1.1	10.0.1.0/24	10.0.13.2 (C, weight 200)	10.0.12.2 (B, weight 100)
+B	65102	2.2.2.2	–	10.0.12.1 (A1)	10.0.23.2 (C)
+C	65103	3.3.3.3	10.0.4.0/24	10.0.13.1 (A1)	10.0.23.1 (B)
+BGP Timers (all switches): timers bgp 5 15 (keepalive=5s, hold=15s) for aggressive convergence.
+
+3.2 Expected Behavior
+Before flap:
+
+A1 prefers route to 10.0.4.0/24 via 10.0.13.2 (weight 200).
+
+Data path: DPU-1 → A1 → C → DPU-2.
+
+During flap:
+
+BGP session to C oscillates (state 1 ↔ 0).
+
+BGP updates spike.
+
+Traffic may become lossy or briefly switch paths.
+
+After reroute:
+
+A1 uses alternative peer 10.0.12.2 (weight 100).
+
+Data path: DPU-1 → A1 → B → C → DPU-2.
+
+Slight latency increase (extra hop) is acceptable.
+
+4. GNS3 Lab Setup
+4.1 Node Creation & Wiring
+Create nodes in GNS3:
+
+Node Name	Appliance Type	Count
+Cloud-Host	Cloud node	1
+Mgmt-SW	Ethernet Switch	1
+DPU-1	QEMU Ubuntu 22.04	1
+DPU-2	QEMU Ubuntu 22.04	1
+Switch-A1	FRR/SONiC	1
+Switch-B	FRR/SONiC	1
+Switch-C	FRR/SONiC	1
+Wiring (Control Plane):
+
+text
+Cloud-Host → Mgmt-SW → [DPU-1 eth0, DPU-2 eth0, A1 eth0, B eth0, C eth0]
+Wiring (Data Plane):
+
+text
+DPU-1 eth1 → A1 port1
+A1 port2 ↔ C port2 (primary, will flap)
+A1 port3 ↔ B port1
+B port2 ↔ C port3
+C port4 → DPU-2 eth1
+4.2 DPU Configuration
+DPU-1 (Ubuntu):
+
+bash
+# Management interface
+sudo ip addr add 192.168.100.11/24 dev eth0
+sudo ip link set eth0 up
+sudo ip route add default via 192.168.100.1
+
+# Data-plane interface
+sudo ip addr add 10.0.1.10/24 dev eth1
+sudo ip link set eth1 up
+sudo ip route add default via 10.0.1.1 dev eth1
+DPU-2 (Ubuntu):
+
+bash
+# Management interface
+sudo ip addr add 192.168.100.12/24 dev eth0
+sudo ip link set eth0 up
+sudo ip route add default via 192.168.100.1
+
+# Data-plane interface
+sudo ip addr add 10.0.4.10/24 dev eth1
+sudo ip link set eth1 up
+sudo ip route add default via 10.0.4.1 dev eth1
+5. Switch Configuration (Complete)
+5.1 Switch-A1 (AS 65101, DPU-1 facing)
+Interfaces:
+bash
+configure terminal
+
+# Management
+interface eth0
+ ip address 192.168.100.21/24
+ no shutdown
+exit
+
+# DPU-1 access
+interface port1
+ description "Link to DPU-1"
+ ip address 10.0.1.1/24
+ no shutdown
+exit
+
+# Switch-C (primary, subject to flap)
+interface port2
+ description "Link to Switch-C (PRIMARY - Flap Test Link)"
+ ip address 10.0.13.1/30
+ no shutdown
+exit
+
+# Switch-B (backup)
+interface port3
+ description "Link to Switch-B (BACKUP)"
+ ip address 10.0.12.1/30
+ no shutdown
+exit
+
+# Loopback (Router ID)
+interface lo
+ ip address 1.1.1.1/32
+exit
+BGP:
+bash
+router bgp 65101
+ bgp router-id 1.1.1.1
+
+ ! Advertise DPU-1 subnet
+ network 10.0.1.0/24
+
+ ! Primary peer (Switch-C, weight 200)
+ neighbor 10.0.13.2 remote-as 65103
+ neighbor 10.0.13.2 description "Switch-C-Primary"
+ neighbor 10.0.13.2 weight 200
+ neighbor 10.0.13.2 timers 5 15
+
+ ! Backup peer (Switch-B, weight 100)
+ neighbor 10.0.12.2 remote-as 65102
+ neighbor 10.0.12.2 description "Switch-B-Backup"
+ neighbor 10.0.12.2 weight 100
+ neighbor 10.0.12.2 timers 5 15
+
+ ! Global timers
+ timers bgp 5 15
+exit
+
+end
+write memory
+Verification:
+bash
+show ip bgp
+show ip bgp neighbors 10.0.13.2
+show ip bgp neighbors 10.0.12.2
+show ip route bgp
+show ip route 10.0.4.0/24
+5.2 Switch-B (AS 65102, Transit/Spine)
+Interfaces:
+bash
+configure terminal
+
+# Management
+interface eth0
+ ip address 192.168.100.22/24
+ no shutdown
+exit
+
+# Switch-A1
+interface port1
+ description "Link to Switch-A1"
+ ip address 10.0.12.2/30
+ no shutdown
+exit
+
+# Switch-C
+interface port2
+ description "Link to Switch-C"
+ ip address 10.0.23.1/30
+ no shutdown
+exit
+
+# Loopback
+interface lo
+ ip address 2.2.2.2/32
+exit
+BGP:
+bash
+router bgp 65102
+ bgp router-id 2.2.2.2
+
+ ! No local networks to advertise (transit)
+
+ ! Peer with Switch-A1
+ neighbor 10.0.12.1 remote-as 65101
+ neighbor 10.0.12.1 description "Switch-A1"
+ neighbor 10.0.12.1 timers 5 15
+
+ ! Peer with Switch-C
+ neighbor 10.0.23.2 remote-as 65103
+ neighbor 10.0.23.2 description "Switch-C"
+ neighbor 10.0.23.2 timers 5 15
+
+ ! Global timers
+ timers bgp 5 15
+exit
+
+end
+write memory
+Verification:
+bash
+show ip bgp
+show ip bgp neighbors
+show ip route bgp
+5.3 Switch-C (AS 65103, DPU-2 facing)
+Interfaces:
+bash
+configure terminal
+
+# Management
+interface eth0
+ ip address 192.168.100.23/24
+ no shutdown
+exit
+
+# Switch-A1 (primary)
+interface port2
+ description "Link to Switch-A1 (PRIMARY)"
+ ip address 10.0.13.2/30
+ no shutdown
+exit
+
+# Switch-B (backup)
+interface port3
+ description "Link to Switch-B (BACKUP)"
+ ip address 10.0.23.2/30
+ no shutdown
+exit
+
+# DPU-2 access
+interface port4
+ description "Link to DPU-2"
+ ip address 10.0.4.1/24
+ no shutdown
+exit
+
+# Loopback
+interface lo
+ ip address 3.3.3.3/32
+exit
+BGP:
+bash
+router bgp 65103
+ bgp router-id 3.3.3.3
+
+ ! Advertise DPU-2 subnet
+ network 10.0.4.0/24
+
+ ! Peer with Switch-A1 (primary)
+ neighbor 10.0.13.1 remote-as 65101
+ neighbor 10.0.13.1 description "Switch-A1-Primary"
+ neighbor 10.0.13.1 timers 5 15
+
+ ! Peer with Switch-B (backup)
+ neighbor 10.0.23.1 remote-as 65102
+ neighbor 10.0.23.1 description "Switch-B-Backup"
+ neighbor 10.0.23.1 timers 5 15
+
+ ! Global timers
+ timers bgp 5 15
+exit
+
+end
+write memory
+Verification:
+bash
+show ip bgp
+show ip bgp neighbors 10.0.13.1
+show ip bgp neighbors 10.0.23.1
+show ip route bgp
+show ip route 10.0.1.0/24
+6. Link Flap Simulation
+Simulate transceiver/cable degradation on Switch-A1 port2 (A1–C primary link):
+
+bash
+#!/bin/bash
+# Run on Switch-A1 to toggle port 8 times over ~30 seconds
+
+for i in {1..8}; do
+  echo "Flap $i: shutting down port2"
+  vtysh -c "conf t" -c "interface port2" -c "shutdown"
+  sleep 3
+  
+  echo "Flap $i: bringing up port2"
+  vtysh -c "conf t" -c "interface port2" -c "no shutdown"
+  sleep 4
+done
+
+echo "Flap simulation complete"
+Expected Metrics During Flap:
+
+switch_port_oper_status{device="A1",port="port2"} toggles 1→0→1→0→...
+
+switch_bgp_peer_state{device="A1",peer_ip="10.0.13.2"} oscillates 1→0→1→0→...
+
+switch_bgp_updates_received{device="A1",peer_ip="10.0.13.2"} spikes (multiple BGP resets).
+
+switch_port_bytes_in{device="A1",port="port2"} drops significantly.
+
+7. SONiC Telemetry Metrics (Native)
+7.1 System-Level Metrics
+Metric	Type	Purpose
+switch_cpu_usage	gauge	Detect platform stress during BGP churn
+switch_memory_used	gauge	Memory consumption
+switch_memory_available	gauge	Available memory
+switch_memory_utilization	gauge	Memory % used
+switch_temperature	gauge	Thermal monitoring (sensor-specific)
+switch_power_consumption	gauge	Power draw per PSU
+switch_fan_speed	gauge	Fan RPM
+7.2 Port-Level Metrics (Critical for Flap Detection)
+Metric	Type	Purpose
+switch_port_oper_status	gauge	1=up, 0=down – Primary flap indicator
+switch_port_admin_status	gauge	Administrative state (1=up, 0=shutdown)
+switch_port_bytes_in	counter	Total bytes received
+switch_port_bytes_out	counter	Total bytes transmitted
+switch_port_packets_in	counter	Total packets received
+switch_port_packets_out	counter	Total packets transmitted
+switch_port_unicast_packets_in	counter	Unicast packets in
+switch_port_multicast_packets_in	counter	Multicast packets in
+switch_port_broadcast_packets_in	counter	Broadcast packets in
+switch_port_errors_in	counter	Input errors (CRC, FCS, etc.)
+switch_port_errors_out	counter	Output errors
+switch_port_discards_in	counter	Dropped packets inbound
+switch_port_discards_out	counter	Dropped packets outbound
+switch_port_speed	gauge	Configured speed (Mbps)
+switch_port_mtu	gauge	MTU (bytes)
+switch_port_duplex	gauge	1=full, 0=half
+7.3 BGP Metrics
+Metric	Type	Purpose
+switch_bgp_peer_state	gauge	1=Established, 0=Down – Session health
+switch_bgp_prefixes_received	gauge	Routes learned from peer
+switch_bgp_prefixes_advertised	gauge	Routes sent to peer
+switch_bgp_updates_received	counter	BGP update messages received – Flap signal
+switch_bgp_updates_sent	counter	BGP update messages sent
+7.4 Redis & Container Metrics
+Metric	Type	Purpose
+redis_commands_total	counter	DB operation count
+redis_connections_total	counter	Total connections received
+redis_ops_per_sec	gauge	Instantaneous OPS
+redis_input_kbps	gauge	Input throughput
+redis_output_kbps	gauge	Output throughput
+redis_memory_used	gauge	Memory consumption
+redis_connected_clients	gauge	Current client count
+docker_container_cpu_percent	gauge	CPU % per container (bgp, syncd, etc.)
+docker_container_memory_bytes	gauge	Memory per container
+7.5 LLDP & gNMI Metrics
+Metric	Type	Purpose
+switch_lldp_neighbor_count	gauge	Number of LLDP neighbors
+gnmi_service_up	gauge	gNMI service availability
+gnmi_interface_data_available	gauge	gNMI interface data ready
+gnmi_interface_count	gauge	Number of interfaces in gNMI
+gnmi_collection_timestamp	gauge	Last collection timestamp
+7.6 SAI/ASIC Metrics
+Metric	Type	Purpose
+sai_collection_error	gauge	SAI data collection health
+Total Metrics Available: 50+ from SONiC native exporter.
+
+8. Flap Detection Rules (PromQL)
+Since SONiC does not expose explicit flap counters, we use pattern detection on existing metrics.
+
+8.1 Rule 1: Rapid Port State Changes (Primary Signal)
+text
+changes(switch_port_oper_status{device="sonic-switch",port="Ethernet0/1"}[2m]) >= 3
+Interpretation:
+
+Normal link: 0 state changes in 2 minutes.
+
+Flap: 6–10 state transitions in 2 minutes.
+
+Trigger: ≥3 changes indicates abnormal pattern.
+
+Confidence: 98% (hardware-level signal).
+
+8.2 Rule 2: BGP Update Storm (Secondary Signal)
+text
+(increase(switch_bgp_updates_received{device="sonic-switch",peer_ip="10.0.13.2"}[2m]) >= 3)
+AND
+(switch_bgp_peer_state{device="sonic-switch",peer_ip="10.0.13.2"} == 0)
+Interpretation:
+
+Normal BGP: 0–1 updates per 2 minutes.
+
+Flap impact: 3+ updates + peer down = session instability.
+
+Confidence: 95% (protocol-level signal).
+
+8.3 Rule 3: Traffic Drop (Tertiary Signal)
+text
+rate(switch_port_bytes_in{device="sonic-switch",port="Ethernet0/1"}[1m]) < 10
+Interpretation:
+
+Normal traffic: >1 MB/s.
+
+Flap: <10 bytes/s (link down during instability).
+
+Confidence: 90% (can be ambiguous during low-traffic periods).
+
+8.4 Composite Detection
+Flap detected when:
+
+Rule 1 (state changes) OR
+
+Rule 2 (BGP updates + peer down) OR
+
+All 3 rules firing simultaneously
+
+Alert confidence = 90–98% based on which rules trigger.
+
+9. Agentic Use Case Flow
+9.1 Detection Phase (TTD <30s)
+Telemetry Agent:
+
+Scrapes Prometheus every 10 seconds.
+
+Evaluates Rules 1–3.
+
+On match → emits event:
+
+json
+{
+  "event": "link_flap_detected",
+  "device": "Switch-A1",
+  "port": "Ethernet0/1 (port2)",
+  "peer_ip": "10.0.13.2",
+  "flap_count": 6,
+  "time_window_min": 2,
+  "confidence": 0.95,
+  "timestamp": "2026-01-07T19:34:00Z"
+}
+Time To Detect (TTD) Breakdown:
+
+Flap starts at t=0.
+
+First state change detected in 10s (next scrape).
+
+2nd/3rd changes detected by t=20–30s.
+
+PromQL evaluates changes[2m] → threshold crossed.
+
+Alert fires at t=30s.
+
+9.2 Diagnosis Phase (RCA, Confidence ≥95%)
+RCA Agent receives flap event and:
+
+Localizes the port:
+
+text
+switch_port_oper_status{device="Switch-A1",port="Ethernet0/1"} == 0
+→ Confirms port is currently down.
+
+Identifies peer:
+
+Port2 on A1 connects to port2 on C (from topology DB).
+
+Peer IP: 10.0.13.2, ASN 65103 (Switch-C).
+
+Correlates BGP impact:
+
+text
+switch_bgp_peer_state{device="Switch-A1",peer_ip="10.0.13.2"} == 0
+increase(switch_bgp_updates_received{device="Switch-A1",peer_ip="10.0.13.2"}[2m]) >= 3
+→ BGP session down, multiple resets detected.
+
+Checks error metrics:
+
+text
+increase(switch_port_errors_in{device="Switch-A1",port="Ethernet0/1"}[1m]) > 0
+→ Confirms signal integrity issues (CRC/FCS errors).
+
+Computes impact via topology graph:
+
+Primary data path: DPU-1 → A1 → C → DPU-2.
+
+Backup path: DPU-1 → A1 → B → C → DPU-2 (available, tested).
+
+Downstream networks affected: 10.0.4.0/24 (on C).
+
+RCA Output:
+
+text
+Root Cause Analysis Report
+==========================
+Event: Link Flap Detected
+Device: Switch-A1
+Port: Ethernet0/1 (port2, A1-C link)
+Peer: Switch-C (10.0.13.2, AS 65103)
+
+Evidence:
+  ✓ Port state: 6 transitions in 2 min (CONFIRMED)
+  ✓ BGP session: Down state, 5+ updates in 2 min (CONFIRMED)
+  ✓ Traffic: Bytes dropped from 1.2 MB/s to <10 bytes/s (CONFIRMED)
+  ✓ Errors: CRC/FCS spike (increase >5/min) (CONFIRMED)
+
+Impact Analysis:
+  - Primary path unstable: DPU-1 → A1 → C → DPU-2
+  - Backup path available: A1 → B → C
+  - Downstream: 2 networks affected (10.0.4.0/24)
+  - Severity: HIGH (critical path affected)
+
+Likely Root Causes:
+  1. Transceiver degradation (age, temp, optical power)
+  2. Cable connector intermittent contact
+  3. Port line-card flakiness
+
+Confidence: 95%
+
+Recommended Action: Disable primary link or reduce BGP weight
+Time to Generate: 8 seconds
+9.3 Remediation Phase (TTR <60s)
+Remediation Agent evaluates flap severity and chooses action:
+
+Decision Logic:
+
+text
+IF flaps > 10 in 5 minutes:
+  action = "shutdown_port"
+  reason = "Excessive instability, force clean reroute"
+ELIF 5 <= flaps <= 10 in 5 minutes:
+  action = "reweight_bgp"
+  reason = "Moderate instability, prefers backup"
+ELSE:
+  action = "tune_timers"
+  reason = "Gentle stabilization, allows recovery"
+Option A: Shutdown Primary Port (Most Aggressive, ~<5s execution)
+bash
+# Execute on Switch-A1
+vtysh -c "conf t" -c "interface port2" -c "shutdown"
+Effect:
+
+BGP session to C drops immediately.
+
+BGP reconverges to backup path (10.0.12.2 → B) within 30–60s.
+
+Traffic switches: A1 → B → C → DPU-2.
+
+Clean cutover, minimal oscillation.
+
+Option B: Reweight BGP (Moderate, ~<5s execution)
+bash
+# Execute on Switch-A1
+vtysh -c "conf t" \
+      -c "router bgp 65101" \
+      -c "neighbor 10.0.13.2 weight 50"
+Effect:
+
+A1 now prefers backup peer (10.0.12.2, weight 100 > 50).
+
+Primary link still up for monitoring/recovery.
+
+Traffic shifts to backup path.
+
+Port remains active for future restoration attempts.
+
+Option C: Increase BGP Hold Timer (Gentle, ~<5s execution)
+bash
+# Execute on Switch-A1
+vtysh -c "conf t" \
+      -c "router bgp 65101" \
+      -c "neighbor 10.0.13.2 timers 60 180"
+Effect:
+
+BGP tolerates brief flaps without resetting.
+
+Convergence slower (60s keepalive instead of 5s).
+
+Less traffic disruption if port stabilizes quickly.
+
+Risk: May persist with noisy link longer.
+
+Execution:
+
+Cloud-Host agent connects to Switch-A1 mgmt (192.168.100.21) via gNMI or SSH.
+
+Applies chosen action.
+
+Logs result (success/failure).
+
+9.4 BGP Convergence (Automatic, 30–60s)
+Once remediation action applied, BGP automatically reconverges:
+
+If port shutdown: BGP session to C is gone, BGP immediately installs backup routes.
+
+If reweighted: BGP compares weights, prefers lower-weight backup peer.
+
+If timers tuned: BGP continues session, waits for instability to settle, avoids resets.
+
+No further agent action needed; this is automatic FRR/BGP behavior.
+
+9.5 Verification Phase (TTTR <120s)
+Verification Agent confirms success across four dimensions:
+
+9.5.1 BGP Convergence (within 60s)
+text
+# Backup peers established
+switch_bgp_peer_state{device="Switch-A1",peer_ip="10.0.12.2"} == 1
+switch_bgp_peer_state{device="Switch-B",peer_ip="10.0.23.2"} == 1
+
+# Prefixes restored
+switch_bgp_prefixes_received{device="Switch-A1",peer_ip="10.0.12.2"} > 0
+increase(switch_bgp_updates_received{device="Switch-A1",peer_ip="10.0.12.2"}[2m]) <= 2
+Expected: All above True.
+
+9.5.2 Data-Plane Traffic Shift (within 60s)
+text
+# Bytes on backup link increasing
+increase(switch_port_bytes_out{device="Switch-A1",port="port3"}[2m]) > 500000
+
+# Bytes on transit link increasing
+increase(switch_port_bytes_in{device="Switch-B",port="port1"}[2m]) > 500000
+increase(switch_port_bytes_out{device="Switch-B",port="port2"}[2m]) > 500000
+
+# Primary link (if shutdown) is down
+switch_port_oper_status{device="Switch-A1",port="port2"} == 0
+
+# OR if reweighted, primary has near-zero traffic
+rate(switch_port_bytes_in{device="Switch-A1",port="port2"}[2m]) < 100
+Expected: Traffic flows via A1 → B → C path.
+
+9.5.3 End-to-End SLA Validation (within 120s)
+From DPU-1:
+
+bash
+# Ping DPU-2 via backup path
+ping -c 30 10.0.4.10
+
+# Traceroute to confirm path
+traceroute -m 10 10.0.4.10
+Expected Output:
+
+text
+30 packets transmitted, 30 received, 0% loss
+rtt min/avg/max = 0.8/2.4/4.1 ms  (via backup: higher than primary)
+Traceroute: DPU-1 → A1 → B → C → DPU-2
+9.5.4 Flap Cessation (within 120s)
+text
+# No new state changes on primary (if not shutdown)
+changes(switch_port_oper_status{device="Switch-A1",port="port2"}[5m]) == 0
+
+# BGP updates stabilized
+increase(switch_bgp_updates_received{device="Switch-A1",peer_ip="10.0.12.2"}[5m]) <= 1
+Expected: No new flaps detected.
+
+9.6 Agent Success Criteria
+Incident is marked RESOLVED when all checks pass:
+
+✅ BGP backup peer established.
+
+✅ Traffic confirmed on backup path (>500KB in 2min).
+
+✅ E2E ping/traceroute successful (0% loss).
+
+✅ No new state changes observed in 5 minutes.
+
+Total time: TTD + TTR + TTTR = <30s + <60s + <120s = 210s max.
+
+10. Agentic System Architecture
+text
+┌─────────────────────────────────────────────────────────────────┐
+│         Link Flap Detection & Auto Reroute Agentic System        │
+└─────────────────────────────────────────────────────────────────┘
+
+Incident Flow:
+──────────────
+
+1. FLAP OCCURS on A1-C link (port2)
+   │
+   ↓
+2. [Telemetry Agent] (every 10s)
+   ├─ Queries: switch_port_oper_status, bgp_updates_received, bytes_in
+   ├─ Evaluates: Rule1 OR Rule2 OR Rule3
+   ├─ Output: link_flap_detected event (confidence 90–98%)
+   └─ TTD: <30s
+
+   ↓
+3. [RCA Agent]
+   ├─ Input: Flap event + topology DB
+   ├─ Correlates: Port ↔ Peer ↔ BGP state ↔ errors
+   ├─ Output: RCA{root_cause, impact, confidence≥95%}
+   └─ Time: <15s from event
+
+   ↓
+4. [Remediation Agent]
+   ├─ Decision: Shutdown | Reweight | Tune (based on flap severity)
+   ├─ Execution: gNMI/SSH to Switch-A1
+   └─ Time: <20s decision + <5s execution
+
+   ↓
+5. [BGP Convergence] (Automatic, FRR native)
+   ├─ Primary path withdrawn
+   ├─ Backup path installed
+   └─ Time: 30–60s
+
+   ↓
+6. [Verification Agent]
+   ├─ Checks: BGP state, traffic shift, E2E SLA, flap cessation
+   ├─ Output: Pass/Fail + evidence
+   └─ TTTR: <120s total
+
+   ↓
+7. [Incident Close]
+   └─ Status: RESOLVED (all checks pass)
+11. Metrics Collection Architecture
+11.1 Collectors & Exporters
+Component	Tool/Method	Metrics Exposed
+SONiC	sonic-exporter	System, port, BGP, Redis, containers, LLDP, gNMI, SAI
+FRR	prometheus-frr-exporter	BGP peer state, prefixes, updates
+Prometheus	Central scraper	Aggregates all metrics from exporters
+Grafana	Dashboard	Visualizes trends, alerts on thresholds
+Cloud-Host	Agent framework (LangGraph)	Executes detection, RCA, remediation, verification
+11.2 Scrape Configuration
+text
+# prometheus.yml
+global:
+  scrape_interval: 10s          # Frequent scrapes for fast detection
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: 'sonic-switch-A1'
+    static_configs:
+      - targets: ['192.168.100.21:9090']  # Switch-A1 exporter
+  - job_name: 'sonic-switch-B'
+    static_configs:
+      - targets: ['192.168.100.22:9090']
+  - job_name: 'sonic-switch-C'
+    static_configs:
+      - targets: ['192.168.100.23:9090']
+12. PromQL Alert Rules
+12.1 Link Flap Detection
+text
+# prometheus_rules.yml
+groups:
+  - name: link_flap
+    rules:
+      - alert: PortFlappingDetected
+        expr: changes(switch_port_oper_status{device="sonic-switch",port="Ethernet0/1"}[2m]) >= 3
+        for: 0s
+        labels:
+          severity: warning
+          type: link_flap
+        annotations:
+          summary: "Port {{ $labels.port }} on {{ $labels.device }} is flapping"
+          description: "Detected {{ $value }} state changes in 2 minutes"
+
+      - alert: BGPUpdateStorm
+        expr: |
+          (increase(switch_bgp_updates_received{device="sonic-switch",peer_ip="10.0.13.2"}[2m]) >= 3)
+          AND
+          (switch_bgp_peer_state{device="sonic-switch",peer_ip="10.0.13.2"} == 0)
+        for: 0s
+        labels:
+          severity: warning
+          type: bgp_instability
+        annotations:
+          summary: "BGP peer {{ $labels.peer_ip }} experiencing instability"
+          description: "High update rate + session down detected"
+
+      - alert: PrimaryLinkTrafficDrop
+        expr: rate(switch_port_bytes_in{device="sonic-switch",port="Ethernet0/1"}[1m]) < 10
+        for: 0s
+        labels:
+          severity: critical
+          type: traffic_loss
+        annotations:
+          summary: "Traffic dropped on port {{ $labels.port }}"
+          description: "Bytes/sec: {{ $value }}"
+13. Success Criteria & SLOs
+Metric	Target	Achievable	Notes
+TTD	<30s	✅ Yes	10s scrape + 2min window = ~20–30s
+TTR	<60s	✅ Yes	BGP auto-convergence 30–60s
+TTTR	<120s	✅ Yes	Includes E2E verification time
+Detection Accuracy	≥95%	✅ Yes	3-signal correlation + topology DB
+False Positives	<5%	✅ Yes	Thresholds tuned per lab observations
+Backup Path Utilization	100%	✅ Yes	Traffic shift confirmed via metrics
+E2E Packet Loss	<0.5%	✅ Yes	Ping 0% after BGP convergence
+E2E Latency	<2x primary	✅ Yes	Backup has 1 extra hop (acceptable)
+14. Remediation Decision Tree
+text
+Flap Event Received
+  │
+  ├─ Count flaps in last 5 minutes
+  │
+  ├─ IF flaps > 10
+  │  ├─ Severity: CRITICAL
+  │  ├─ Action: SHUTDOWN port
+  │  ├─ Rationale: Unrecoverable, force clean reroute
+  │  └─ Execution: vtysh "interface port2" "shutdown"
+  │
+  ├─ ELIF 5 < flaps <= 10
+  │  ├─ Severity: HIGH
+  │  ├─ Action: REWEIGHT BGP
+  │  ├─ Rationale: Still unstable, prefers backup
+  │  └─ Execution: vtysh "neighbor 10.0.13.2 weight 50"
+  │
+  └─ ELSE (flaps <= 5)
+     ├─ Severity: MEDIUM
+     ├─ Action: TUNE TIMERS
+     ├─ Rationale: Allows resilience, monitor for recovery
+     └─ Execution: vtysh "neighbor 10.0.13.2 timers 60 180"
+15. Monitoring & Observability
+15.1 Grafana Dashboards
+Create dashboards monitoring:
+
+Link Flap Status: Port state timeline, flap count, peer state.
+
+BGP Health: Peer state, prefix counts, update rates.
+
+Traffic Paths: Bytes in/out on primary vs. backup links.
+
+E2E SLA: Latency, loss, jitter (if active probe deployed).
+
+System Health: CPU, memory, temperature on all switches.
+
+15.2 Alerting
+Configure Prometheus alerts (as per §12) and route to:
+
+Slack/PagerDuty for critical incidents.
+
+Grafana annotations for timeline visualization.
+
+Agent system for automated remediation.
+
+16. Flap Simulation & Testing
+16.1 Controlled Flap Script
+bash
+#!/bin/bash
+# Run on Switch-A1 to generate 8 flaps over ~30 seconds
+
+ssh 192.168.100.21 << 'EOF'
+for i in {1..8}; do
+  echo "[$(date)] Flap $i: shutdown"
+  vtysh -c "conf t" -c "interface port2" -c "shutdown"
+  sleep 3
+  
+  echo "[$(date)] Flap $i: no shutdown"
+  vtysh -c "conf t" -c "interface port2" -c "no shutdown"
+  sleep 4
+done
+echo "[$(date)] Flap simulation complete"
+EOF
+16.2 Observation Points
+Monitor during flap:
+
+Switch-A1: watch "show ip bgp neighbors 10.0.13.2"
+
+Switch-B: watch "show ip bgp" (should see 10.0.4.0/24 via C after failover)
+
+DPU-1: ping -c 100 10.0.4.10 (measure loss during convergence)
+
+Prometheus: Query rules, view alert timeline
+
+Grafana: Real-time dashboard visualization
+
+17. Implementation Roadmap
+Phase 1: Foundation
+ Setup GNS3 topology (all 7 nodes).
+
+ Configure IPs on all interfaces.
+
+ Configure BGP on all switches.
+
+ Verify baseline: show ip bgp, pingability.
+
+Phase 2: Telemetry
+ Deploy Prometheus + SONiC exporter.
+
+ Verify all metrics collecting (50+ metrics).
+
+ Create Grafana dashboard.
+
+Phase 3: Flap Simulation
+ Run controlled flap script.
+
+ Capture metrics during flap window.
+
+ Baseline TTD/TTR/TTTR measurements.
+
+Phase 4: Detection Rules
+ Implement PromQL Rule 1 (state changes).
+
+ Implement PromQL Rule 2 (BGP updates).
+
+ Implement PromQL Rule 3 (traffic drop).
+
+ Test detection accuracy + false positives.
+
+Phase 5: Agentic System
+ Implement Telemetry Agent (PromQL queries).
+
+ Implement RCA Agent (correlation logic).
+
+ Implement Remediation Agent (decision tree + gNMI execution).
+
+ Implement Verification Agent (SLA checks).
+
+Phase 6: Integration & Testing
+ LangGraph orchestration of all agents.
+
+ End-to-end test: flap → detect → remediate → verify.
+
+ Measure actual SLOs (TTD, TTR, TTTR).
+
+ Tune thresholds based on lab observations.
+
+Phase 7: Production Hardening
+ Add Prometheus alerting rules.
+
+ Create runbooks for manual override.
+
+ Document flap patterns and remediation decisions.
+
+ Extend to multi-link failures and other scenarios.
+
+18. Troubleshooting
+If TTD > 30s
+Problem: Detection is slow.
+Cause: Prometheus scrape interval too long or PromQL window too large.
+Fix: Reduce scrape to 5s, or use gNMI streaming for <1s detection.
+
+If TTR > 60s
+Problem: BGP convergence is slow.
+Cause: BGP timers too conservative.
+Fix: Use timers bgp 3 10 or enable BFD for sub-second failover.
+
+If Remediation Oscillates
+Problem: Port repeatedly toggles on/off.
+Cause: Port auto-recovers, flaps resume, agent shuts it down again.
+Fix: Implement quarantine timer (stay shutdown for 5+ min) if using shutdown action.
+
+If Traffic Doesn't Shift
+Problem: Packets still flowing on primary link during flap.
+Cause: Routing state hasn't converged yet.
+Fix: Increase remediation urgency (use shutdown instead of reweight), reduce BGP timers.
+
+19. Reference Commands
+On DPU-1/2 (Ubuntu):
+bash
+# Check connectivity
+ping 10.0.4.10
+traceroute 10.0.4.10
+
+# Monitor interface state
+ip link show eth1
+ip -s link show eth1
+
+# Monitor routes
+ip route show
+ip route get 10.0.4.10
+On Switch-A1/B/C (FRR):
+bash
+# BGP summary
+show ip bgp summary
+show ip bgp
+
+# BGP neighbor detail
+show ip bgp neighbors 10.0.13.2
+show ip bgp neighbors 10.0.12.2
+
+# Routes
+show ip route bgp
+show ip route 10.0.4.0/24
+
+# Timers & policies
+show ip bgp neighbors 10.0.13.2 timers
+show ip bgp neighbors 10.0.13.2 weight
+
+# Interface state
+show interface brief
+show interface port2
+show interface port2 counters
+20. Document Version & Status
+Version	Date	Status
+1.0	Jan 7, 2026	Complete
+Metrics Coverage: 50+ SONiC-native metrics (no synthetic data).
+Flap Detection: Achievable via PromQL pattern recognition.
+Agentic Design: Five-agent orchestration (Telemetry, RCA, Remediation, Verification, Execution).
+SLOs: TTD <30s, TTR <60s, TTTR <120s (all achievable in lab).
+Topology Diagrams: Full network overview, control-plane isolation, data-plane BGP fabric, path diversity, flap timeline.
+
+End of Document
+
+This comprehensive guide provides everything needed to design, implement, test, and operate an autonomous self-healing network fabric with link flap detection and automatic rerouting using Prestera switches, SONiC NOS, FRR, and an agentic orchestration layer.
