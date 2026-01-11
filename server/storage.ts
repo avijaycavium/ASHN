@@ -16,6 +16,7 @@ import {
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 import { getGNS3Client, getGNS3Config, type GNS3Link } from "./gns3";
+import { generate52DeviceTopology } from "./topology-generator";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -840,6 +841,8 @@ function generateMockTopologyLinks(devices: Device[]): TopologyLink[] {
 export class MemStorage implements IStorage {
   private users: Map<string, User>;
   private mockDevices: Device[];
+  private topologyDevices: Device[];
+  private topologyLinks: TopologyLink[];
   private incidents: Incident[];
   private agents: Agent[];
   private auditEntries: AuditEntry[];
@@ -848,10 +851,16 @@ export class MemStorage implements IStorage {
   private cachedGNS3Links: GNS3Link[] | null = null;
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL = 5000;
+  private useTopologyGenerator: boolean = true;
 
   constructor() {
     this.users = new Map();
     this.mockDevices = generateMockDevices();
+    
+    const topology = generate52DeviceTopology();
+    this.topologyDevices = topology.devices;
+    this.topologyLinks = topology.links;
+    
     this.incidents = generateIncidents();
     this.agents = generateAgents();
     this.auditEntries = generateAuditEntries();
@@ -933,8 +942,12 @@ export class MemStorage implements IStorage {
           return devices;
         }
       } catch (error) {
-        console.error("GNS3 fetch failed, falling back to mock data:", error);
+        console.error("GNS3 fetch failed, falling back to topology data:", error);
       }
+    }
+    
+    if (this.useTopologyGenerator) {
+      return this.topologyDevices;
     }
     
     return this.mockDevices;
@@ -1020,6 +1033,10 @@ export class MemStorage implements IStorage {
   }
 
   async getTopologyLinks(): Promise<TopologyLink[]> {
+    if (this.useTopologyGenerator) {
+      return this.topologyLinks;
+    }
+    
     const config = getGNS3Config();
     
     if (config.enabled && config.projectId) {
