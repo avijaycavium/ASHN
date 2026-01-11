@@ -67,57 +67,6 @@ export default function MetricsPage() {
             <>
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">SNR</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold font-mono" data-testid="metric-snr">
-                      {currentMetrics.snr.toFixed(1)}
-                    </span>
-                    <span className="text-sm text-muted-foreground">dB</span>
-                  </div>
-                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
-                    <TrendingUp className="h-3 w-3" />
-                    <span>Normal range</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">BER</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold font-mono" data-testid="metric-ber">
-                      {currentMetrics.ber.toFixed(1)}
-                    </span>
-                    <span className="text-sm text-muted-foreground">%</span>
-                  </div>
-                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
-                    <TrendingUp className="h-3 w-3" />
-                    <span>Low error rate</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">FEC</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-2xl font-semibold font-mono" data-testid="metric-fec">
-                      {currentMetrics.fec.toFixed(1)}
-                    </span>
-                    <span className="text-sm text-muted-foreground">%</span>
-                  </div>
-                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
-                    <TrendingUp className="h-3 w-3" />
-                    <span>Correction active</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">CPU</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -135,18 +84,69 @@ export default function MetricsPage() {
               </Card>
               <Card>
                 <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Memory</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold font-mono" data-testid="metric-memory">
+                      {currentMetrics.memory.toFixed(0)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
+                    <TrendingUp className="h-3 w-3" />
+                    <span>Normal usage</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">Port Util</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold font-mono" data-testid="metric-port-util">
+                      {currentMetrics.portUtilization.toFixed(0)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
+                    <TrendingUp className="h-3 w-3" />
+                    <span>Healthy bandwidth</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">Latency</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-baseline gap-2">
                     <span className="text-2xl font-semibold font-mono" data-testid="metric-latency">
-                      {currentMetrics.latency.toFixed(0)}
+                      {currentMetrics.latency.toFixed(1)}
                     </span>
                     <span className="text-sm text-muted-foreground">ms</span>
                   </div>
                   <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
                     <TrendingUp className="h-3 w-3" />
                     <span>Low latency</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">BGP Peers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-2xl font-semibold font-mono" data-testid="metric-bgp-peers">
+                      {currentMetrics.bgpPeers}
+                    </span>
+                    <span className="text-sm text-muted-foreground">active</span>
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 text-xs text-status-online">
+                    <TrendingUp className="h-3 w-3" />
+                    <span>All established</span>
                   </div>
                 </CardContent>
               </Card>
@@ -163,35 +163,7 @@ export default function MetricsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Signal Quality Overview</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Signal-to-Noise Ratio</span>
-                  <span className="text-sm font-mono text-muted-foreground">
-                    Target: &gt;10dB
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Bit Error Rate</span>
-                  <span className="text-sm font-mono text-muted-foreground">
-                    Target: &lt;1e-6
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm">Forward Error Correction</span>
-                  <span className="text-sm font-mono text-muted-foreground">
-                    Target: &lt;5%
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">System Performance Overview</CardTitle>
+              <CardTitle className="text-base">Switch Performance Targets</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -202,15 +174,43 @@ export default function MetricsPage() {
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm">Network Latency P95</span>
-                  <span className="text-sm font-mono text-muted-foreground">
-                    Target: &lt;150ms
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
                   <span className="text-sm">Memory Usage</span>
                   <span className="text-sm font-mono text-muted-foreground">
                     Target: &lt;85%
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Port Utilization</span>
+                  <span className="text-sm font-mono text-muted-foreground">
+                    Target: &lt;75%
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Endpoint Performance Targets</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Network Latency P95</span>
+                  <span className="text-sm font-mono text-muted-foreground">
+                    Target: &lt;20ms
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">Packet Drops</span>
+                  <span className="text-sm font-mono text-muted-foreground">
+                    Target: &lt;50/hr
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm">BGP Peer Sessions</span>
+                  <span className="text-sm font-mono text-muted-foreground">
+                    Target: 100% established
                   </span>
                 </div>
               </div>

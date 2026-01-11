@@ -367,11 +367,12 @@ export interface AuditEntry {
 
 export interface MetricTrend {
   timestamp: string;
-  snr: number;
-  ber: number;
-  fec: number;
   cpu: number;
+  memory: number;
+  portUtilization: number;
   latency: number;
+  packetDrops: number;
+  bgpPeers: number;
 }
 
 export interface SystemHealth {

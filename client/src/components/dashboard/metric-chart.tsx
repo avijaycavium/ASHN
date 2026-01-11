@@ -26,16 +26,26 @@ const timeRanges = [
 ];
 
 const metricColors = {
-  snr: "hsl(var(--chart-1))",
-  ber: "hsl(var(--chart-2))",
-  fec: "hsl(var(--chart-3))",
-  cpu: "hsl(var(--chart-4))",
-  latency: "hsl(var(--chart-5))",
+  cpu: "hsl(var(--chart-1))",
+  memory: "hsl(var(--chart-2))",
+  portUtilization: "hsl(var(--chart-3))",
+  latency: "hsl(var(--chart-4))",
+  packetDrops: "hsl(var(--chart-5))",
+  bgpPeers: "hsl(var(--primary))",
+};
+
+const metricLabels: Record<string, string> = {
+  cpu: "CPU",
+  memory: "Memory",
+  portUtilization: "Port Util",
+  latency: "Latency",
+  packetDrops: "Pkt Drops",
+  bgpPeers: "BGP Peers",
 };
 
 export function MetricChart({ data, title = "Metric Trends" }: MetricChartProps) {
   const [selectedRange, setSelectedRange] = useState(60);
-  const [activeMetrics, setActiveMetrics] = useState<string[]>(["snr", "cpu", "latency"]);
+  const [activeMetrics, setActiveMetrics] = useState<string[]>(["cpu", "memory", "portUtilization"]);
 
   const toggleMetric = (metric: string) => {
     setActiveMetrics((prev) =>
@@ -96,7 +106,7 @@ export function MetricChart({ data, title = "Metric Trends" }: MetricChartProps)
                 className="h-2 w-2 rounded-full"
                 style={{ backgroundColor: color }}
               />
-              {metric.toUpperCase()}
+              {metricLabels[metric] || metric.toUpperCase()}
             </Button>
           ))}
         </div>
@@ -132,36 +142,6 @@ export function MetricChart({ data, title = "Metric Trends" }: MetricChartProps)
               <Legend
                 wrapperStyle={{ fontSize: "12px", paddingTop: "10px" }}
               />
-              {activeMetrics.includes("snr") && (
-                <Line
-                  type="monotone"
-                  dataKey="snr"
-                  stroke={metricColors.snr}
-                  strokeWidth={2}
-                  dot={false}
-                  name="SNR"
-                />
-              )}
-              {activeMetrics.includes("ber") && (
-                <Line
-                  type="monotone"
-                  dataKey="ber"
-                  stroke={metricColors.ber}
-                  strokeWidth={2}
-                  dot={false}
-                  name="BER"
-                />
-              )}
-              {activeMetrics.includes("fec") && (
-                <Line
-                  type="monotone"
-                  dataKey="fec"
-                  stroke={metricColors.fec}
-                  strokeWidth={2}
-                  dot={false}
-                  name="FEC"
-                />
-              )}
               {activeMetrics.includes("cpu") && (
                 <Line
                   type="monotone"
@@ -169,7 +149,27 @@ export function MetricChart({ data, title = "Metric Trends" }: MetricChartProps)
                   stroke={metricColors.cpu}
                   strokeWidth={2}
                   dot={false}
-                  name="CPU"
+                  name="CPU %"
+                />
+              )}
+              {activeMetrics.includes("memory") && (
+                <Line
+                  type="monotone"
+                  dataKey="memory"
+                  stroke={metricColors.memory}
+                  strokeWidth={2}
+                  dot={false}
+                  name="Memory %"
+                />
+              )}
+              {activeMetrics.includes("portUtilization") && (
+                <Line
+                  type="monotone"
+                  dataKey="portUtilization"
+                  stroke={metricColors.portUtilization}
+                  strokeWidth={2}
+                  dot={false}
+                  name="Port Util %"
                 />
               )}
               {activeMetrics.includes("latency") && (
@@ -179,7 +179,27 @@ export function MetricChart({ data, title = "Metric Trends" }: MetricChartProps)
                   stroke={metricColors.latency}
                   strokeWidth={2}
                   dot={false}
-                  name="Latency"
+                  name="Latency (ms)"
+                />
+              )}
+              {activeMetrics.includes("packetDrops") && (
+                <Line
+                  type="monotone"
+                  dataKey="packetDrops"
+                  stroke={metricColors.packetDrops}
+                  strokeWidth={2}
+                  dot={false}
+                  name="Pkt Drops"
+                />
+              )}
+              {activeMetrics.includes("bgpPeers") && (
+                <Line
+                  type="monotone"
+                  dataKey="bgpPeers"
+                  stroke={metricColors.bgpPeers}
+                  strokeWidth={2}
+                  dot={false}
+                  name="BGP Peers"
                 />
               )}
             </LineChart>

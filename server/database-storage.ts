@@ -478,16 +478,31 @@ export class DatabaseStorage {
   async getMetricTrends(): Promise<MetricTrend[]> {
     const now = Date.now();
     const trends: MetricTrend[] = [];
+    const allDevices = await this.getDevices();
+    const switchDevices = allDevices.filter(d => d.type === 'tor' || d.type === 'spine' || d.type === 'core');
+    const endpointDevices = allDevices.filter(d => d.type === 'endpoint');
+    
+    const avgSwitchCpu = switchDevices.length > 0 
+      ? switchDevices.reduce((sum, d) => sum + d.cpu, 0) / switchDevices.length 
+      : 35;
+    const avgSwitchMemory = switchDevices.length > 0 
+      ? switchDevices.reduce((sum, d) => sum + d.memory, 0) / switchDevices.length 
+      : 40;
+    const avgEndpointCpu = endpointDevices.length > 0 
+      ? endpointDevices.reduce((sum, d) => sum + d.cpu, 0) / endpointDevices.length 
+      : 20;
     
     for (let i = 23; i >= 0; i--) {
       const timestamp = new Date(now - i * 60 * 60 * 1000).toISOString();
+      const variation = Math.sin(i * 0.5) * 10;
       trends.push({
         timestamp,
-        snr: 25 + Math.random() * 5,
-        ber: 0.0001 + Math.random() * 0.0002,
-        fec: 0.001 + Math.random() * 0.002,
-        cpu: 30 + Math.random() * 20,
-        latency: 100 + Math.random() * 50,
+        cpu: Math.max(10, Math.min(90, avgSwitchCpu + variation + (Math.random() - 0.5) * 10)),
+        memory: Math.max(20, Math.min(85, avgSwitchMemory + variation * 0.5 + (Math.random() - 0.5) * 8)),
+        portUtilization: 40 + variation + Math.random() * 15,
+        latency: 5 + Math.random() * 10 + Math.abs(variation) * 0.3,
+        packetDrops: Math.max(0, Math.floor(Math.random() * 50 + variation * 2)),
+        bgpPeers: switchDevices.length * 3 + Math.floor(Math.random() * 5 - 2),
       });
     }
     
