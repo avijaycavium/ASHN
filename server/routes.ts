@@ -1212,6 +1212,71 @@ export async function registerRoutes(
     }
   });
 
+  // Topology sync - fetch live device telemetry from Python agents
+  app.get("/api/topology/telemetry", async (req, res) => {
+    try {
+      const deviceId = req.query.device_id;
+      const url = deviceId 
+        ? `${AGENT_SERVER_URL}/api/devices/telemetry?device_id=${deviceId}`
+        : `${AGENT_SERVER_URL}/api/devices/telemetry`;
+      
+      const response = await fetchWithTimeout(url, { method: "GET" }, 5000);
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const result = await response.json();
+      res.json({ connected: true, ...result });
+    } catch (error) {
+      // Return fallback when Python service unavailable
+      res.json({
+        connected: false,
+        success: false,
+        devices: [],
+        source: { gns3: "unavailable", prometheus: "unavailable" },
+        note: "Agent server not connected",
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Topology sync trigger - fetch updates and broadcast via SSE
+  app.post("/api/topology/sync", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/topology/sync`,
+        { method: "POST", headers: { "Content-Type": "application/json" } },
+        10000
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const result = await response.json();
+      
+      // Broadcast any device status updates via SSE
+      if (result.updates && Array.isArray(result.updates)) {
+        for (const update of result.updates) {
+          sseEmitter.emit("event", {
+            type: update.type || "device_status_changed",
+            data: update
+          });
+        }
+      }
+      
+      res.json({ connected: true, ...result });
+    } catch (error) {
+      res.json({
+        connected: false,
+        success: false,
+        updates: [],
+        nodeCount: 0,
+        linkCount: 0,
+        source: { gns3: "unavailable", prometheus: "unavailable" },
+        note: "Agent server not connected",
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
   // Auto-trigger LangGraph agents on fault injection
   app.post("/api/faults/inject-with-healing", async (req, res) => {
     try {

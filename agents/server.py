@@ -445,7 +445,7 @@ def get_tools_health():
     """
     from .tools.gns3 import GNS3Tools
     from .tools.prometheus import PrometheusTools
-    from .tools.sonic import SonicTools
+    from .tools.sonic import SONiCTools
     
     # Check GNS3 connectivity
     gns3_status = "disconnected"
@@ -496,7 +496,7 @@ def get_tools_health():
     
     if sonic_enabled:
         try:
-            sonic = SonicTools(simulate=False)
+            sonic = SONiCTools(simulate=False)
             # Try a simple operation to check connectivity
             sonic_status = "connected"
             sonic_message = "SONiC management active"
@@ -556,6 +556,156 @@ def get_tools_health():
             "connected": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "connected"),
             "simulated": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "simulated"),
             "disconnected": sum(1 for s in [gns3_status, prometheus_status, sonic_status] if s == "disconnected")
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+@app.route('/api/devices/telemetry', methods=['GET'])
+def get_device_telemetry():
+    """
+    Fetch device telemetry from GNS3/Prometheus for topology sync
+    Returns aggregated metrics for all devices
+    """
+    from .tools.gns3 import GNS3Tools
+    from .tools.prometheus import PrometheusTools
+    
+    device_id = request.args.get('device_id')
+    
+    gns3_enabled = os.environ.get("GNS3_ENABLED", "false").lower() == "true"
+    prometheus_enabled = os.environ.get("PROMETHEUS_ENABLED", "false").lower() == "true"
+    
+    gns3 = GNS3Tools(simulate=not gns3_enabled)
+    prometheus = PrometheusTools(simulate=not prometheus_enabled)
+    
+    devices = []
+    
+    # Get nodes from GNS3
+    nodes_result = gns3.get_nodes()
+    if nodes_result.get("success"):
+        for node in nodes_result.get("data", []):
+            node_id = node.get("node_id", node.get("name", "unknown"))
+            node_name = node.get("name", "unknown")
+            
+            # Query metrics from Prometheus for this device
+            cpu_result = prometheus.get_device_metrics(node_name, "cpu_utilization")
+            mem_result = prometheus.get_device_metrics(node_name, "memory_utilization")
+            
+            cpu_value = 0
+            mem_value = 0
+            
+            if cpu_result.get("status") == "success":
+                results = cpu_result.get("data", {}).get("result", [])
+                if results:
+                    cpu_value = float(results[0].get("value", [0, 0])[1])
+            
+            if mem_result.get("status") == "success":
+                results = mem_result.get("data", {}).get("result", [])
+                if results:
+                    mem_value = float(results[0].get("value", [0, 0])[1])
+            
+            # Determine device status based on GNS3 node status and metrics
+            node_status = node.get("status", "unknown")
+            if node_status == "started":
+                if cpu_value > 90 or mem_value > 90:
+                    status = "critical"
+                elif cpu_value > 75 or mem_value > 80:
+                    status = "degraded"
+                else:
+                    status = "healthy"
+            elif node_status == "stopped":
+                status = "offline"
+            else:
+                status = "unknown"
+            
+            device_data = {
+                "id": node_id,
+                "name": node_name,
+                "status": status,
+                "gns3Status": node_status,
+                "cpu": round(cpu_value, 1),
+                "memory": round(mem_value, 1),
+                "nodeType": node.get("node_type", "unknown"),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            if device_id is None or device_id == node_id or device_id == node_name:
+                devices.append(device_data)
+    
+    return jsonify({
+        "success": True,
+        "devices": devices,
+        "source": {
+            "gns3": "live" if gns3_enabled else "simulated",
+            "prometheus": "live" if prometheus_enabled else "simulated"
+        },
+        "timestamp": datetime.utcnow().isoformat()
+    })
+
+
+@app.route('/api/topology/sync', methods=['POST'])
+def sync_topology():
+    """
+    Trigger a topology sync - fetches latest state from GNS3/Prometheus
+    and returns updates that should be broadcast via SSE
+    """
+    from .tools.gns3 import GNS3Tools
+    from .tools.prometheus import PrometheusTools
+    
+    gns3_enabled = os.environ.get("GNS3_ENABLED", "false").lower() == "true"
+    prometheus_enabled = os.environ.get("PROMETHEUS_ENABLED", "false").lower() == "true"
+    
+    gns3 = GNS3Tools(simulate=not gns3_enabled)
+    prometheus = PrometheusTools(simulate=not prometheus_enabled)
+    
+    updates = []
+    
+    # Get current topology from GNS3
+    nodes_result = gns3.get_nodes()
+    links_result = gns3.get_links()
+    
+    if nodes_result.get("success"):
+        for node in nodes_result.get("data", []):
+            node_name = node.get("name", "unknown")
+            
+            # Check metrics for anomalies
+            cpu_result = prometheus.get_device_metrics(node_name, "cpu_utilization")
+            
+            cpu_value = 0
+            if cpu_result.get("status") == "success":
+                results = cpu_result.get("data", {}).get("result", [])
+                if results:
+                    cpu_value = float(results[0].get("value", [0, 0])[1])
+            
+            if cpu_value > 90:
+                updates.append({
+                    "type": "device_status_changed",
+                    "deviceId": node.get("node_id", node_name),
+                    "deviceName": node_name,
+                    "oldStatus": "healthy",
+                    "newStatus": "critical",
+                    "reason": f"CPU utilization at {cpu_value}%",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            elif cpu_value > 75:
+                updates.append({
+                    "type": "device_status_changed",
+                    "deviceId": node.get("node_id", node_name),
+                    "deviceName": node_name,
+                    "oldStatus": "healthy",
+                    "newStatus": "degraded",
+                    "reason": f"CPU utilization elevated at {cpu_value}%",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+    
+    return jsonify({
+        "success": True,
+        "updates": updates,
+        "nodeCount": len(nodes_result.get("data", [])) if nodes_result.get("success") else 0,
+        "linkCount": len(links_result.get("data", [])) if links_result.get("success") else 0,
+        "source": {
+            "gns3": "live" if gns3_enabled else "simulated",
+            "prometheus": "live" if prometheus_enabled else "simulated"
         },
         "timestamp": datetime.utcnow().isoformat()
     })

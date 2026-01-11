@@ -177,6 +177,19 @@ class PrometheusTools:
             }
         }
     
+    def get_device_metrics(self, device_id: str, metric_name: str) -> dict:
+        """
+        Get a specific metric value for a device
+        
+        Args:
+            device_id: Device identifier
+            metric_name: Metric name (cpu_utilization, memory_utilization, etc.)
+        
+        Returns:
+            Query results for the metric
+        """
+        return self.query(f'{metric_name}{{device="{device_id}"}}')
+    
     def detect_anomalies(self, device_id: str) -> List[Dict]:
         """
         Detect metric anomalies for a device
