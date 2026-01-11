@@ -1277,6 +1277,13 @@ class AgentOrchestrator {
       await delay(2000);
       this.demoScenario.stage = "detection";
 
+      this.addInternalLog("detection", "DetectionAgent", "llm_context", "LLM Prompt: Anomaly Detection Request", {
+        system_prompt: "You are a network anomaly detection agent. Analyze the provided metrics and identify any anomalies that deviate from established baselines.",
+        user_message: `Analyze metrics for device ${deviceId || "all"}: interface_status, cpu_utilization, memory_usage, link_state, error_counters. Compare against 24-hour baseline.`,
+        model: "gpt-4o",
+        temperature: 0.1
+      });
+
       this.addInternalLog("detection", "DetectionAgent", "tool_call", "Querying Prometheus for anomalies", {
         tool: "PrometheusTools.detect_anomalies",
         parameters: { device_id: deviceId || "all" },
@@ -1288,6 +1295,12 @@ class AgentOrchestrator {
         metrics_fetched: ["interface_status", "cpu_utilization", "memory_usage", "link_state", "error_counters"],
         data_source: "Prometheus + SNMP",
         sample_count: 127
+      });
+
+      this.addInternalLog("detection", "DetectionAgent", "llm_context", "LLM Response: Anomaly Analysis Complete", {
+        response_summary: "Anomaly detected with high confidence",
+        tokens_used: { prompt: 847, completion: 312, total: 1159 },
+        latency_ms: 1243
       });
       
       if (scenario === "link_failure") {
@@ -1446,6 +1459,14 @@ class AgentOrchestrator {
       await delay(2000);
       this.demoScenario.stage = "diagnosis";
 
+      this.addInternalLog("rca", "RCAAgent", "llm_context", "LLM Prompt: Root Cause Analysis Request", {
+        system_prompt: "You are a network root cause analysis expert. Given the detected anomaly and diagnostic data, identify the most likely root cause using hypothesis-driven reasoning.",
+        user_message: `Fault detected: ${scenario}. Analyze potential causes: hardware failure, configuration error, traffic surge, software bug. Device: ${deviceId || "network-wide"}.`,
+        model: "gpt-4o",
+        temperature: 0.2,
+        context_injection: "SONiC BGP/ECMP playbooks, historical incident data"
+      });
+
       this.addInternalLog("rca", "RCAAgent", "reasoning", "Loading RCA Knowledge Base", {
         fault_type: scenario,
         knowledge_base_entry: "SONiC BGP/ECMP playbooks",
@@ -1563,6 +1584,13 @@ class AgentOrchestrator {
         };
       }
 
+      this.addInternalLog("rca", "RCAAgent", "llm_context", "LLM Response: Root Cause Determined", {
+        response_summary: `Root cause identified: ${scenario === "link_failure" ? "Physical link failure" : scenario === "port_congestion" ? "Traffic surge + QoS misconfiguration" : "DPU resource exhaustion"}`,
+        confidence_score: scenario === "link_failure" ? 98 : scenario === "port_congestion" ? 89 : 85,
+        tokens_used: { prompt: 1523, completion: 456, total: 1979 },
+        latency_ms: 2134
+      });
+
       this.addInternalLog("rca", "RCAAgent", "decision", "Root Cause Identified", {
         root_cause: scenario === "link_failure" ? "Physical link failure" : 
                     scenario === "port_congestion" ? "Traffic surge + QoS misconfiguration" :
@@ -1576,6 +1604,14 @@ class AgentOrchestrator {
 
       await delay(2000);
       this.demoScenario.stage = "remediation";
+
+      this.addInternalLog("remediation", "RemediationAgent", "llm_context", "LLM Prompt: Remediation Plan Request", {
+        system_prompt: "You are a network remediation agent. Generate a safe, reversible action plan based on the root cause and available playbooks.",
+        user_message: `Root cause: ${scenario}. Available actions: routing_convergence, qos_policy, rate_limiting, workload_migration. Generate remediation plan with rollback steps.`,
+        model: "gpt-4o",
+        temperature: 0.1,
+        safety_constraints: "All actions must be reversible, policy-compliant, and low-risk"
+      });
 
       this.addInternalLog("remediation", "RemediationAgent", "reasoning", "Loading Remediation Playbook", {
         fault_type: scenario,
@@ -1740,6 +1776,14 @@ class AgentOrchestrator {
       this.demoScenario.stage = "verification";
       const verificationStartTime = Date.now();
 
+      this.addInternalLog("verification", "VerificationAgent", "llm_context", "LLM Prompt: Verification Assessment Request", {
+        system_prompt: "You are a network verification agent. Analyze post-remediation metrics and determine if all success criteria have been met.",
+        user_message: `Remediation completed for ${scenario}. Compare current metrics against baselines to verify fix success.`,
+        model: "gpt-4o",
+        temperature: 0.0,
+        context_injection: "Pre-incident baselines, success thresholds"
+      });
+
       this.addInternalLog("verification", "VerificationAgent", "reasoning", "Loading Verification Criteria", {
         fault_type: scenario,
         success_criteria: scenario === "link_failure" ? 
@@ -1880,6 +1924,13 @@ class AgentOrchestrator {
           }
         };
       }
+
+      this.addInternalLog("verification", "VerificationAgent", "llm_context", "LLM Response: Verification Assessment Complete", {
+        response_summary: "All success criteria met, remediation verified",
+        confidence_score: 100,
+        tokens_used: { prompt: 1234, completion: 287, total: 1521 },
+        latency_ms: 1567
+      });
 
       this.addInternalLog("verification", "VerificationAgent", "decision", "Verification Complete", {
         all_criteria_met: true,
