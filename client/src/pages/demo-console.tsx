@@ -948,19 +948,40 @@ export default function DemoConsolePage() {
 
   const injectFaultMutation = useMutation({
     mutationFn: async (scenario: string) => {
-      // If a device is selected, use the real LangGraph agents
+      // Map scenario IDs to orchestrator scenario types
+      const scenarioTypeMap: Record<string, string> = {
+        "bgp_link_flap": "link_failure",
+        "bgp_session_instability": "port_congestion", 
+        "traffic_drop": "dpu_overload"
+      };
+      const orchestratorScenario = scenarioTypeMap[scenario] || "link_failure";
+      
+      // If a device is selected, trigger BOTH real LangGraph agents AND demo UI flow
       if (selectedDeviceInfo) {
         const faultType = scenarioToFaultType[scenario] || "bgp_link_flap";
-        const res = await apiRequest("POST", "/api/faults/inject-with-healing", { 
+        
+        // First, trigger LangGraph agents for real autonomous healing
+        const langGraphRes = await apiRequest("POST", "/api/faults/inject-with-healing", { 
           deviceId: selectedDeviceInfo.id,
           faultType: faultType,
           severity: "medium",
           autoHeal: true
         });
-        return res.json();
+        const langGraphResult = await langGraphRes.json();
+        
+        // Also start the demo UI flow for visual progress tracking
+        await apiRequest("POST", "/api/demo/inject-fault", { 
+          scenario: orchestratorScenario,
+          deviceId: selectedDeviceInfo.id,
+          targetDeviceId: selectedDeviceInfo.id
+        });
+        
+        return langGraphResult;
       } else {
-        // Fallback to simulated demo flow
-        const res = await apiRequest("POST", "/api/demo/inject-fault", { scenario });
+        // Fallback to simulated demo flow only
+        const res = await apiRequest("POST", "/api/demo/inject-fault", { 
+          scenario: orchestratorScenario
+        });
         return res.json();
       }
     },
