@@ -666,6 +666,19 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/metrics/collector/interval", async (req, res) => {
+    try {
+      const { intervalSeconds } = req.body;
+      if (!intervalSeconds || typeof intervalSeconds !== 'number') {
+        return res.status(400).json({ error: "intervalSeconds is required and must be a number" });
+      }
+      await metricsCollector.setInterval(intervalSeconds);
+      res.json({ success: true, message: `Interval set to ${intervalSeconds} seconds`, interval: intervalSeconds });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message || "Failed to set interval" });
+    }
+  });
+
   // Metrics API endpoints
   app.get("/api/metrics/refresh", async (req, res) => {
     try {

@@ -140,6 +140,17 @@ class MetricsCollector {
   async triggerCollection(): Promise<void> {
     await this.collectMetrics();
   }
+
+  async setInterval(intervalSeconds: number): Promise<void> {
+    if (intervalSeconds < 5 || intervalSeconds > 3600) {
+      throw new Error("Interval must be between 5 and 3600 seconds");
+    }
+    this.collectionInterval = intervalSeconds * 1000;
+    console.log(`[MetricsCollector] Interval changed to ${intervalSeconds}s`);
+    if (this.isRunning) {
+      await this.restart();
+    }
+  }
 }
 
 export const metricsCollector = new MetricsCollector();
