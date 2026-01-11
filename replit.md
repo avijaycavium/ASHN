@@ -163,3 +163,100 @@ The Network Copilot uses:
 - Node/link existence is verified against live topology before mutations
 - Status checks prevent redundant operations (e.g., starting an already running node)
 - Each GNS3 operation is wrapped in try/catch with descriptive error messages
+
+## LangGraph Autonomous Agents
+
+AASHN implements a fully autonomous self-healing pipeline using LangGraph with Python. The agent system can automatically detect, diagnose, remediate, and verify network issues without human intervention.
+
+### Architecture
+
+```
+Node.js Backend (Express)          Python LangGraph Agents
+┌─────────────────────────┐       ┌─────────────────────────────────┐
+│ - API endpoints          │       │ Detection → RCA → Remediation   │
+│ - Database/WebSocket     │ HTTP  │ → Verification → Resolved       │
+│ - UI serving             │ ◄────►│                                 │
+│ - Fault injection        │       │ Tools: SONiC, Prometheus, GNS3  │
+└─────────────────────────┘       └─────────────────────────────────┘
+```
+
+### Agent Pipeline
+
+| Agent | Role | AI-Powered |
+|-------|------|------------|
+| DetectionAgent | Anomaly detection and fault classification | Yes |
+| RCAAgent | Root cause analysis with hypothesis generation | Yes |
+| RemediationAgent | Execute corrective actions via SONiC/GNS3 | No |
+| VerificationAgent | Validate fix success via metrics | No |
+
+### Supported Fault Types
+
+| Fault Type | Description | Auto-Remediation |
+|------------|-------------|------------------|
+| `bgp_link_flap` | BGP session flapping due to unstable link | Yes |
+| `bgp_session_instability` | BGP session instability without physical link issues | Yes |
+| `traffic_drop` | Unexpected traffic drop indicating routing issues | Yes |
+| `cpu_spike` | CPU utilization spike affecting performance | Yes |
+| `memory_exhaustion` | Memory utilization approaching critical levels | Yes |
+
+### LangGraph API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/langgraph/trigger` | Trigger healing workflow for a device/fault |
+| `GET /api/langgraph/status` | Get agent server connection status |
+| `GET /api/langgraph/capabilities` | Get supported fault types and agents |
+| `POST /api/langgraph/test` | Run a test workflow |
+| `GET /api/langgraph/workflow/:id` | Get workflow result by incident ID |
+| `POST /api/faults/inject-with-healing` | Inject fault and auto-trigger healing |
+
+### Python Agent Directory Structure
+
+```
+agents/
+├── __init__.py
+├── graph.py           # LangGraph workflow definition
+├── state.py           # IncidentState schema
+├── server.py          # Flask API server (port 5001)
+├── run.py             # Run script
+├── nodes/
+│   ├── detection.py   # Anomaly detection logic
+│   ├── rca.py         # AI-powered root cause analysis
+│   ├── remediation.py # SONiC remediation actions
+│   └── verification.py # Fix validation
+└── tools/
+    ├── sonic.py       # SONiC vtysh commands
+    ├── prometheus.py  # Metrics queries
+    └── gns3.py        # GNS3 node control
+```
+
+### Running the Agent Server
+
+The Python agent server runs on port 5001:
+
+```bash
+python agents/run.py
+```
+
+### Workflow State (IncidentState)
+
+The LangGraph workflow tracks incident lifecycle through:
+- `incident_id`: Unique incident identifier
+- `fault_type`: Classified fault type
+- `stage`: Current workflow stage (detection → rca → remediation → verification → resolved)
+- `detection_confidence`: Confidence score from detection
+- `root_cause`: Identified root cause
+- `remediation_actions`: Actions taken to fix the issue
+- `verification_checks`: Metric checks performed
+- `ttd_seconds`: Time to detect
+- `ttr_seconds`: Time to remediate
+- `tttr_seconds`: Time to verify
+- `events`: Full event timeline
+
+### Conditional Routing
+
+The workflow includes intelligent routing:
+- Low detection confidence → ends early for human review
+- Low RCA confidence or high risk → skips remediation
+- Verification failure → retries with different approach (max 2 retries)
+- Verification success → incident resolved

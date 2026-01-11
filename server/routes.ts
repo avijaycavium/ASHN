@@ -893,5 +893,237 @@ export async function registerRoutes(
     }
   });
 
+  // LangGraph Agent API endpoints - Connects to Python agent server
+  const AGENT_SERVER_URL = process.env.AGENT_SERVER_URL || "http://localhost:5001";
+  const AGENT_FETCH_TIMEOUT = 30000; // 30 second timeout for agent calls
+
+  // Helper function for fetch with timeout
+  async function fetchWithTimeout(url: string, options: RequestInit, timeout: number = AGENT_FETCH_TIMEOUT): Promise<Response> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      return response;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  app.post("/api/langgraph/trigger", async (req, res) => {
+    try {
+      const { deviceId, deviceName, deviceType, faultType, severity } = req.body;
+      
+      if (!deviceId || !faultType) {
+        return res.status(400).json({ error: "deviceId and faultType are required" });
+      }
+
+      // Get device info if not provided
+      let device = null;
+      if (!deviceName) {
+        device = await databaseStorage.getDevice(deviceId);
+        if (!device) {
+          return res.status(404).json({ error: "Device not found" });
+        }
+      }
+
+      const payload = {
+        device_id: deviceId,
+        device_name: deviceName || device?.name || deviceId,
+        device_type: deviceType || device?.tier || "unknown",
+        fault_type: faultType,
+        severity: severity || "medium"
+      };
+
+      // Call Python agent server with timeout
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/trigger`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      
+      // Log the agent execution
+      console.log(`[LangGraph] Healing workflow triggered: ${result.incident_id} for ${faultType} on ${payload.device_name}`);
+      console.log(`[LangGraph] Stage: ${result.stage}, Verification: ${result.verification_passed}`);
+
+      res.json(result);
+    } catch (error) {
+      const isTimeout = error instanceof Error && error.name === 'AbortError';
+      console.error("LangGraph trigger error:", error);
+      res.status(isTimeout ? 504 : 500).json({
+        error: isTimeout ? "Agent server timeout" : "Failed to trigger healing workflow",
+        details: error instanceof Error ? error.message : "Unknown error",
+        note: "Ensure Python agent server is running on port 5001"
+      });
+    }
+  });
+
+  app.get("/api/langgraph/status", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/status`,
+        { method: "GET" },
+        5000 // 5 second timeout for status check
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const status = await response.json();
+      res.json({ connected: true, ...status });
+    } catch (error) {
+      res.json({
+        connected: false,
+        error: error instanceof Error ? error.message : "Agent server not available",
+        serverUrl: AGENT_SERVER_URL
+      });
+    }
+  });
+
+  app.get("/api/langgraph/capabilities", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/capabilities`,
+        { method: "GET" },
+        5000
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const capabilities = await response.json();
+      res.json({ connected: true, ...capabilities });
+    } catch (error) {
+      // Return static capabilities if server is unavailable
+      res.json({
+        connected: false,
+        supported_fault_types: [
+          { type: "bgp_link_flap", description: "BGP session flapping", auto_remediation: true },
+          { type: "bgp_session_instability", description: "BGP session instability", auto_remediation: true },
+          { type: "traffic_drop", description: "Unexpected traffic drop", auto_remediation: true },
+          { type: "cpu_spike", description: "CPU utilization spike", auto_remediation: true },
+          { type: "memory_exhaustion", description: "Memory exhaustion", auto_remediation: true }
+        ],
+        agents: [
+          { name: "DetectionAgent", role: "Anomaly detection and fault classification" },
+          { name: "RCAAgent", role: "Root cause analysis and hypothesis generation" },
+          { name: "RemediationAgent", role: "Execute corrective actions via SONiC/GNS3" },
+          { name: "VerificationAgent", role: "Validate fix success via metrics" }
+        ]
+      });
+    }
+  });
+
+  app.post("/api/langgraph/test", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        }
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const result = await response.json();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : "Test failed",
+        note: "Ensure Python agent server is running"
+      });
+    }
+  });
+
+  app.get("/api/langgraph/workflow/:incidentId", async (req, res) => {
+    try {
+      const response = await fetchWithTimeout(
+        `${AGENT_SERVER_URL}/api/agents/workflow/${req.params.incidentId}`,
+        { method: "GET" },
+        5000
+      );
+      if (!response.ok) {
+        throw new Error(`Agent server error: ${response.status}`);
+      }
+      const result = await response.json();
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({
+        error: "Failed to get workflow status",
+        details: error instanceof Error ? error.message : "Unknown error"
+      });
+    }
+  });
+
+  // Auto-trigger LangGraph agents on fault injection
+  app.post("/api/faults/inject-with-healing", async (req, res) => {
+    try {
+      const { deviceId, faultType, severity, autoHeal } = req.body;
+      
+      if (!deviceId || !faultType) {
+        return res.status(400).json({ error: "deviceId and faultType are required" });
+      }
+
+      // Inject the fault
+      injectFault(deviceId, faultType, severity || "medium");
+
+      // Get device info
+      const device = await databaseStorage.getDevice(deviceId);
+
+      // If autoHeal is enabled, trigger LangGraph agents
+      let healingResult = null;
+      if (autoHeal !== false) {
+        try {
+          const response = await fetchWithTimeout(
+            `${AGENT_SERVER_URL}/api/agents/trigger`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                device_id: deviceId,
+                device_name: device?.name || deviceId,
+                device_type: device?.tier || "unknown",
+                fault_type: faultType,
+                severity: severity || "medium"
+              })
+            }
+          );
+          
+          if (response.ok) {
+            healingResult = await response.json();
+            
+            // If healing was successful, clear the fault
+            if (healingResult.verification_passed) {
+              clearFault(deviceId);
+            }
+          }
+        } catch (e) {
+          console.warn("Auto-healing not available:", e);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Fault ${faultType} injected on ${deviceId}`,
+        fault: { deviceId, faultType, severity: severity || "medium" },
+        healing: healingResult
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to inject fault with healing" });
+    }
+  });
+
   return httpServer;
 }

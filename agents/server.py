@@ -5,9 +5,11 @@ Exposes endpoints for triggering and monitoring agent workflows
 import os
 import uuid
 import logging
+import threading
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from concurrent.futures import ThreadPoolExecutor
 
 from .graph import run_healing_workflow
 from .state import create_initial_state
@@ -23,6 +25,9 @@ CORS(app)
 
 active_workflows = {}
 completed_workflows = {}
+workflow_lock = threading.Lock()
+
+executor = ThreadPoolExecutor(max_workers=5)
 
 
 @app.route('/health', methods=['GET'])
@@ -36,6 +41,46 @@ def health_check():
     })
 
 
+def _execute_workflow_background(
+    incident_id: str,
+    device_id: str,
+    device_name: str,
+    device_type: str,
+    fault_type: str,
+    severity: str
+):
+    """Execute workflow in background thread"""
+    try:
+        result = run_healing_workflow(
+            incident_id=incident_id,
+            device_id=device_id,
+            device_name=device_name,
+            device_type=device_type,
+            fault_type=fault_type,
+            severity=severity
+        )
+        
+        with workflow_lock:
+            if incident_id in active_workflows:
+                del active_workflows[incident_id]
+            completed_workflows[incident_id] = {
+                "result": result,
+                "completed_at": datetime.utcnow().isoformat()
+            }
+            
+        logger.info(f"Workflow {incident_id} completed with stage: {result.get('stage')}")
+        
+    except Exception as e:
+        logger.error(f"Background workflow {incident_id} failed: {e}")
+        with workflow_lock:
+            if incident_id in active_workflows:
+                del active_workflows[incident_id]
+            completed_workflows[incident_id] = {
+                "result": {"stage": "failed", "error": str(e)},
+                "completed_at": datetime.utcnow().isoformat()
+            }
+
+
 @app.route('/api/agents/trigger', methods=['POST'])
 def trigger_healing():
     """
@@ -47,7 +92,8 @@ def trigger_healing():
         "device_name": "string", 
         "device_type": "core|spine|tor|dpu",
         "fault_type": "bgp_link_flap|bgp_session_instability|traffic_drop|cpu_spike|memory_exhaustion",
-        "severity": "critical|high|medium|low"
+        "severity": "critical|high|medium|low",
+        "async": true/false (optional, default false)
     }
     """
     try:
@@ -68,16 +114,30 @@ def trigger_healing():
         device_type = data.get("device_type", "unknown")
         fault_type = data["fault_type"]
         severity = data.get("severity", "medium")
+        run_async = data.get("async", False)
         
         logger.info(f"Triggering healing workflow: {incident_id}")
-        logger.info(f"Device: {device_name}, Fault: {fault_type}, Severity: {severity}")
+        logger.info(f"Device: {device_name}, Fault: {fault_type}, Severity: {severity}, Async: {run_async}")
         
-        active_workflows[incident_id] = {
-            "status": "running",
-            "started_at": datetime.utcnow().isoformat(),
-            "device_name": device_name,
-            "fault_type": fault_type
-        }
+        with workflow_lock:
+            active_workflows[incident_id] = {
+                "status": "running",
+                "started_at": datetime.utcnow().isoformat(),
+                "device_name": device_name,
+                "fault_type": fault_type
+            }
+        
+        if run_async:
+            executor.submit(
+                _execute_workflow_background,
+                incident_id, device_id, device_name, device_type, fault_type, severity
+            )
+            return jsonify({
+                "success": True,
+                "incident_id": incident_id,
+                "async": True,
+                "message": "Workflow started in background. Poll /api/agents/workflow/<incident_id> for status."
+            }), 202
         
         result = run_healing_workflow(
             incident_id=incident_id,
@@ -88,11 +148,13 @@ def trigger_healing():
             severity=severity
         )
         
-        del active_workflows[incident_id]
-        completed_workflows[incident_id] = {
-            "result": result,
-            "completed_at": datetime.utcnow().isoformat()
-        }
+        with workflow_lock:
+            if incident_id in active_workflows:
+                del active_workflows[incident_id]
+            completed_workflows[incident_id] = {
+                "result": result,
+                "completed_at": datetime.utcnow().isoformat()
+            }
         
         return jsonify({
             "success": True,
@@ -125,28 +187,30 @@ def trigger_healing():
 @app.route('/api/agents/status', methods=['GET'])
 def get_agent_status():
     """Get status of all agent workflows"""
-    return jsonify({
-        "active": len(active_workflows),
-        "completed": len(completed_workflows),
-        "active_workflows": active_workflows,
-        "recent_completed": dict(list(completed_workflows.items())[-10:])
-    })
+    with workflow_lock:
+        return jsonify({
+            "active": len(active_workflows),
+            "completed": len(completed_workflows),
+            "active_workflows": dict(active_workflows),
+            "recent_completed": dict(list(completed_workflows.items())[-10:])
+        })
 
 
 @app.route('/api/agents/workflow/<incident_id>', methods=['GET'])
 def get_workflow_result(incident_id: str):
     """Get the result of a specific workflow"""
-    if incident_id in active_workflows:
-        return jsonify({
-            "status": "running",
-            "workflow": active_workflows[incident_id]
-        })
-    
-    if incident_id in completed_workflows:
-        return jsonify({
-            "status": "completed",
-            "workflow": completed_workflows[incident_id]
-        })
+    with workflow_lock:
+        if incident_id in active_workflows:
+            return jsonify({
+                "status": "running",
+                "workflow": dict(active_workflows[incident_id])
+            })
+        
+        if incident_id in completed_workflows:
+            return jsonify({
+                "status": "completed",
+                "workflow": dict(completed_workflows[incident_id])
+            })
     
     return jsonify({"error": "Workflow not found"}), 404
 

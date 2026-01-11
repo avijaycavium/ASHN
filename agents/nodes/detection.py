@@ -154,7 +154,7 @@ def _classify_fault(
         evidence_scores["bgp_session_instability"] += 0.3
         evidence_scores["traffic_drop"] += 0.2
     
-    best_match = max(evidence_scores, key=evidence_scores.get)
+    best_match = max(evidence_scores, key=lambda x: evidence_scores[x])
     confidence = min(evidence_scores[best_match], 1.0)
     
     if anomalies:

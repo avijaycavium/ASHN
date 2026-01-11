@@ -19,15 +19,25 @@ from .nodes.verification import verification_node
 logger = logging.getLogger(__name__)
 
 
-def get_llm() -> ChatOpenAI:
-    """Get the OpenAI LLM client using Replit AI Integration"""
-    return ChatOpenAI(
-        model="gpt-4o",
-        base_url="https://ai.replit.dev",
-        api_key=os.environ.get("REPLIT_AI_API_KEY", ""),
-        temperature=0.3,
-        max_tokens=2000
-    )
+def get_llm() -> ChatOpenAI | None:
+    """Get the OpenAI LLM client using Replit AI Integration
+    
+    Returns None if no API key is available, enabling graceful fallback to rule-based logic.
+    """
+    api_key = os.environ.get("REPLIT_AI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("No API key found. AI-enhanced features will use rule-based fallback.")
+        return None
+    try:
+        return ChatOpenAI(
+            model="gpt-4o",
+            base_url="https://ai.replit.dev",
+            api_key=api_key,
+            temperature=0.3
+        )
+    except Exception as e:
+        logger.warning(f"Failed to initialize LLM: {e}. Using rule-based fallback.")
+        return None
 
 
 def should_continue_after_detection(state: IncidentState) -> Literal["rca", "end_unconfirmed"]:
@@ -92,8 +102,11 @@ def should_retry_or_end(state: IncidentState) -> Literal["resolved", "failed", "
 
 def detection_wrapper(state: IncidentState) -> dict:
     """Wrapper that optionally uses AI for detection"""
+    llm = get_llm()
+    if llm is None:
+        logger.info("Using rule-based detection (no AI key available)")
+        return detection_node(state)
     try:
-        llm = get_llm()
         return detection_node_with_ai(state, llm)
     except Exception as e:
         logger.warning(f"AI detection failed, using rule-based: {e}")
@@ -102,8 +115,11 @@ def detection_wrapper(state: IncidentState) -> dict:
 
 def rca_wrapper(state: IncidentState) -> dict:
     """Wrapper that optionally uses AI for RCA"""
+    llm = get_llm()
+    if llm is None:
+        logger.info("Using rule-based RCA (no AI key available)")
+        return rca_node(state)
     try:
-        llm = get_llm()
         return rca_node_with_ai(state, llm)
     except Exception as e:
         logger.warning(f"AI RCA failed, using rule-based: {e}")
