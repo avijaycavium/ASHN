@@ -22,6 +22,14 @@ Drizzle ORM with a PostgreSQL dialect manages the database, with schemas defined
 ### Key Design Patterns
 Shared TypeScript interfaces in `shared/schema.ts` are used across frontend and backend. Path aliases (`@/*` for client, `@shared/*` for shared code) are used. UI components are organized into `components/ui/` for primitives and `components/dashboard/` for features. A centralized query client handles API fetching.
 
+### Real-Time SSE Infrastructure
+The application uses Server-Sent Events (SSE) for real-time updates across all pages:
+- **Unified endpoint**: `/api/stream/events` broadcasts all events via EventEmitter
+- **Event types**: `incident_created`, `incident_updated`, `incident_resolved`, `stage_changed`, `device_status_changed`, `agent_log`, `telemetry_update`, `anomaly_detected`
+- **Frontend subscriptions**: Dashboard, Incidents, Topology, Agents, and Demo Console pages subscribe to SSE and invalidate React Query caches when relevant events occur
+- **Stage transitions**: `setStage()` helper in orchestrator persists stage changes to database and broadcasts SSE updates
+- **Incident lifecycle**: Fault injection creates incidents → device status changes to degraded/critical → orchestrator runs healing workflow → incident resolved → device status reset to healthy
+
 ### GNS3 Integration
 AASHN integrates with GNS3 network simulation to provide real device data. It connects to a GNS3 server and specific project, mapping GNS3 nodes to AASHN device types based on naming conventions. It allows starting, stopping, and reloading GNS3 nodes.
 
